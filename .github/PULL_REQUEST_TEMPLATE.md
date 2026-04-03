@@ -25,7 +25,7 @@ Closes #<!-- issue number -->
 
 ## Code Checklist
 
-- [ ] My code follows the Go style (`gofmt`, `golangci-lint` passes)
+- [ ] My code follows the Rust style (`rustfmt`, `clippy` passes)
 - [ ] I have added/updated tests where applicable
 - [ ] I have updated documentation if needed
 - [ ] No API keys, secrets, or cloud dependencies introduced

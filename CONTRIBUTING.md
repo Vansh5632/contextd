@@ -62,7 +62,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 feat: add shell command watcher
 fix: resolve memory leak in event buffer
 docs: update architecture overview
-chore: configure golangci-lint
+chore: configure clippy
 refactor: simplify importance scorer logic
 test: add unit tests for use-case classifier
 ```
@@ -102,7 +102,7 @@ git push origin feat/your-feature-name
 
 ## Code Standards
 
-- Language: **Go** — follow `gofmt` and `golangci-lint` rules
+- Language: **Rust** — follow `rustfmt` and `clippy` rules
 - All public functions must have comments
 - No external dependencies without prior discussion in an issue
 - Keep everything local-first — no cloud calls, no API keys in code

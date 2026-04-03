@@ -10,7 +10,7 @@ It is the **neutral infrastructure layer** that sits underneath Cursor, Claude, 
 
 It solves the core fragmentation problem: every AI tool is blind to what the others know. contextd watches your shell, editor, filesystem, git, processes, and project files in real time and maintains a single, always-up-to-date, structured "what am I doing right now" context snapshot that any agent can instantly read via MCP or Unix socket.
 
-Everything runs 100% locally. No cloud. No API keys. Single Go binary + systemd user service.
+Everything runs 100% locally. No cloud. No API keys. Single Rust binary + systemd user service.
 
 ## Core Architecture (Finalized)
 
@@ -28,17 +28,17 @@ Everything runs 100% locally. No cloud. No API keys. Single Go binary + systemd 
 
 We have finalized:
 - Full system design (use-case routing + 4-tier memory)
-- Go tech stack decision
+- Rust tech stack decision
 - Event sources strategy
 - Memory pipeline flowchart
 
-We are now starting clean implementation of the Go daemon.
+We are now starting clean implementation of the Rust daemon.
 
 ## Tech Stack (Locked)
 
-- Core daemon: Go (single static binary)
+- Core daemon: Rust (single static binary)
 - Local AI: Ollama (Phi-3 Mini + nomic-embed-text)
-- Storage: SQLite + pure-Go vector similarity
+- Storage: SQLite + pure-Rust vector similarity
 - VS Code extension: TypeScript (thin client)
 - Shell/Git hooks: Bash
 - Protocol: MCP (Model Context Protocol) + custom Unix socket
@@ -48,7 +48,7 @@ We are now starting clean implementation of the Go daemon.
 When I ask you to write code:
 1. Always respect the finalized architecture above.
 2. Keep everything local-first and single-binary friendly.
-3. Prefer pure Go where possible.
+3. Prefer pure Rust where possible.
 4. Follow the internal package structure we will define.
 5. Think in terms of performance, privacy, and zero-friction install.
 

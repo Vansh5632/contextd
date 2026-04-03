@@ -27,7 +27,7 @@ assignees: vansh5632
 ## Environment
 
 - OS: <!-- e.g. Ubuntu 24.04 -->
-- Go version: <!-- e.g. go1.22 -->
+- Rust version: <!-- e.g. rustc 1.76 -->
 - contextd version/commit: <!-- e.g. v0.1.0 or git SHA -->
 - Ollama version (if relevant): 
 

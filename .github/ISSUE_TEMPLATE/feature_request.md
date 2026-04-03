@@ -24,7 +24,7 @@ assignees: vansh5632
 <!-- (4-tier memory, use-case classifier, MCP server, Unix socket, etc.) -->
 
 - [ ] This is local-first (no cloud/API keys required)
-- [ ] This fits within the existing Go single-binary design
+- [ ] This fits within the existing Rust single-binary design
 - [ ] I have read the [CONTRIBUTING.md](../../CONTRIBUTING.md)
 
 ## Additional Context

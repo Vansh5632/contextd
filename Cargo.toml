@@ -1,0 +1,64 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core"
+]
+
+[workspace.package]
+version     = "0.1.0"
+edition     = "2021"
+authors     = ["Your Name"]
+license     = "MIT OR Apache-2.0"
+repository  = "https://github.com/vansh5632/contextd"
+rust-version = "1.80"
+
+# Shared deps — every crate inherits from here, no version drift
+[workspace.dependencies]
+# Async runtime
+tokio        = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+
+# Serialization
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+toml         = "0.8"
+
+# Error handling
+thiserror    = "2"
+anyhow       = "1"
+
+# Logging / tracing
+tracing               = "0.1"
+tracing-subscriber    = { version = "0.3", features = ["env-filter", "json"] }
+
+# Storage
+rusqlite     = { version = "0.31", features = ["bundled"] }  # bundled = no system sqlite needed
+sqlite-vec   = "0.1"
+
+# File watching
+notify       = "6"
+
+# Graph (for mid-term memory knowledge graph)
+petgraph     = "0.6"
+
+# HTTP client (for Ollama)
+reqwest      = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Compression (for Tier 3 blobs)
+zstd         = "0.13"
+
+# Hashing and IDs
+ulid         = "1"          # time-ordered IDs for events
+blake3       = "1"          # fast content hashing
+
+# Testing
+tokio-test   = "0.4"
+
+[profile.release]
+opt-level   = 3
+lto         = "thin"        # link-time optimization for smaller binary
+codegen-units = 1
+strip       = "symbols"     # strip debug symbols in release
+
+[profile.dev]
+opt-level   = 1             # faster builds in dev, still usable perf

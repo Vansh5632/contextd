@@ -15,7 +15,7 @@ It eliminates the need for humans to copy-paste context between tools.
 - Watches shell, editor, filesystem, git, processes, and project manifests in real time
 - Maintains a live, structured context snapshot
 - Exposes it via MCP and Unix socket
-- Fully offline, privacy-first, single static Go binary
+- Fully offline, privacy-first, single static Rust binary
 
 ## Finalized System Design Highlights
 
@@ -56,7 +56,7 @@ contextd/
 - All AI calls must go through local Ollama only.
 - Never suggest cloud services or external APIs unless explicitly asked.
 
-**Current Phase:** We have just locked the complete architecture and are beginning clean Go implementation.
+**Current Phase:** We have just locked the complete architecture and are beginning clean Rust implementation.
 
 Read `claude.md` for additional Claude-specific guidance.
 

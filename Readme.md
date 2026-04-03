@@ -36,7 +36,7 @@ Each tool has its own isolated memory. You — the human — become the bottlene
 - **Intelligent background intelligence** — consolidation, summarization, graph building, importance-based pruning
 - **MCP Server** — native Model Context Protocol support
 - **Unix domain socket** — ultra-low-latency local access
-- **Privacy-first & offline** — single static Go binary, runs as systemd user service
+- **Privacy-first & offline** — single static Rust binary, runs as systemd user service
 
 ---
 
@@ -103,9 +103,9 @@ flowchart TD
 
 | Component              | Technology                          |
 |------------------------|-------------------------------------|
-| Core Daemon            | Go (single static binary)           |
+| Core Daemon            | Rust (single static binary)           |
 | Local AI               | Ollama (Phi-3 Mini + nomic-embed-text) |
-| Storage                | SQLite + pure-Go vector similarity  |
+| Storage                | SQLite + pure-Rust vector similarity  |
 | Event Sources          | inotify, Unix sockets, git hooks, /proc |
 | Protocol               | MCP (Model Context Protocol) + custom socket |
 | VS Code Extension      | TypeScript (thin client)            |
@@ -117,9 +117,9 @@ flowchart TD
 ## Project Status (March 29, 2026)
 
 - ✅ Full architecture finalized (use-case routing + 4-tier memory)
-- ✅ Tech stack & language decision locked (Go)
+- ✅ Tech stack & language decision locked (Rust)
 - ✅ `claude.md` and `agent.md` written
-- 🔨 **Implementation Phase** — building the Go daemon from scratch
+- 🔨 **Implementation Phase** — building the Rust daemon from scratch
 
 We are currently starting clean implementation following the exact architecture above.
 
@@ -145,8 +145,8 @@ Everything else is automatic.
 ```bash
 git clone https://github.com/yourusername/contextd.git
 cd contextd
-go mod tidy
-go run ./cmd/contextd
+cargo build
+cargo run
 ```
 
 (Full setup guide coming in `docs/` once v0 is running.)
@@ -166,7 +166,7 @@ All production code lives under `internal/`. Public interfaces are in `api/`.
 1. Read `claude.md` (for Claude) or `agent.md` (for any agent)
 2. Follow the finalized architecture strictly
 3. Keep everything **local-first** and **single-binary friendly**
-4. Prefer pure Go implementations
+4. Prefer pure Rust implementations
 
 This is the foundation of what we believe will become a major piece of developer infrastructure in 2026–2027.
 
