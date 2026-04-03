@@ -107,6 +107,17 @@ git push origin feat/your-feature-name
 - No external dependencies without prior discussion in an issue
 - Keep everything local-first — no cloud calls, no API keys in code
 
+### Local CI Preflight
+
+Before opening a PR, run the same checks used by CI:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo check --workspace --all-targets --all-features
+cargo test --workspace --all-features
+```
+
 ---
 
 ## What Needs an Issue First?

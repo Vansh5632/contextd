@@ -28,6 +28,7 @@ Closes #<!-- issue number -->
 - [ ] My code follows the Rust style (`rustfmt`, `clippy` passes)
 - [ ] I have added/updated tests where applicable
 - [ ] I have updated documentation if needed
+- [ ] CI is passing (`fmt`, `clippy`, `check`, and `test`)
 - [ ] No API keys, secrets, or cloud dependencies introduced
 - [ ] Everything runs 100% locally
 
