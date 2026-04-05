@@ -49,7 +49,12 @@ mod tests {
     fn event_source_rejects_unknown_values() {
         let err = serde_json::from_str::<EventSource>("\"unknown_source\"")
             .expect_err("unknown source must fail deserialization");
-        let msg = err.to_string();
+
+        // Don't depend on the exact error message wording; just assert it's a data error.
+        assert!(
+            err.is_data(),
+            "expected data error for unknown variant, got: {err}"
+        );
 
         assert!(msg.contains("unknown variant"));
     }
