@@ -1,9 +1,12 @@
 [package]
-name = "core"
+name = "contextd-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+
+[lib]
+name = "contextd_core"
 
 [dependencies]
 serde = { workspace = true }
