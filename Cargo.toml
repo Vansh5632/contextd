@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/core"
-, "crates/store"]
+, "crates/sources", "crates/store"]
 
 [workspace.package]
 version     = "0.1.0"
