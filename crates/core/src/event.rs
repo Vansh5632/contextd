@@ -30,9 +30,33 @@ mod tests {
 
     #[test]
     fn event_source_uses_snake_case_in_json() {
-        let s =
-            serde_json::to_string(&EventSource::FileSystem).expect("event source should serialize");
-        assert_eq!(s, "\"file_system\"");
+        let cases = [
+            (EventSource::Shell, "\"shell\""),
+            (EventSource::FileSystem, "\"file_system\""),
+            (EventSource::Git, "\"git\""),
+            (EventSource::Editor, "\"editor\""),
+            (EventSource::Proc, "\"proc\""),
+            (EventSource::Manifest, "\"manifest\""),
+        ];
+
+        for (source, expected) in cases {
+            let actual = serde_json::to_string(&source).expect("event source should serialize");
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn event_source_rejects_unknown_values() {
+        let err = serde_json::from_str::<EventSource>("\"unknown_source\"")
+            .expect_err("unknown source must fail deserialization");
+
+        // Don't depend on the exact error message wording; just assert it's a data error.
+        assert!(
+            err.is_data(),
+            "expected data error for unknown variant, got: {err}"
+        );
+
+        assert!(msg.contains("unknown variant"));
     }
 
     #[test]
