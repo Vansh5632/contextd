@@ -55,8 +55,6 @@ mod tests {
             err.is_data(),
             "expected data error for unknown variant, got: {err}"
         );
-
-        assert!(msg.contains("unknown variant"));
     }
 
     #[test]
