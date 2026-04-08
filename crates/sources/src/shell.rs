@@ -38,19 +38,31 @@ pub async fn start_shell_listener(
             let (reader, _) = stream.split();
             let mut lines = BufReader::new(reader).lines();
 
-            while let Ok(Some(line)) = lines.next_line().await {
-                match serde_json::from_str::<RawEvent>(&line) {
-                    Ok(event) => {
-                        // Send it to the rest of the application
-                        if let Err(e) = tx.send(event) {
-                            warn!("Failed to broadcast event (no receivers?): {}", e);
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        match serde_json::from_str::<RawEvent>(&line) {
+                            Ok(event) => {
+                                // Send it to the rest of the application
+                                if let Err(e) = tx.send(event) {
+                                    warn!("Failed to broadcast event (no receivers?): {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to parse incoming shell event: {}. Payload: {}",
+                                    e, line
+                                );
+                            }
                         }
                     }
+                    Ok(None) => {
+                        debug!("Shell event stream closed by peer");
+                        break;
+                    }
                     Err(e) => {
-                        error!(
-                            "Failed to parse incoming shell event: {}. Payload: {}",
-                            e, line
-                        );
+                        warn!("I/O error while reading from shell event stream: {}", e);
+                        break;
                     }
                 }
             }
