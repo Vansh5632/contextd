@@ -14,9 +14,8 @@ pub async fn start_shell_listener(
     let path = socket_path.as_ref();
 
     // Clean up the old socket file if the daemon crashed previously
-    if path.exists() {
+      if path.exists() {
         std::fs::remove_file(path)?;
-    }
 
     let listener = UnixListener::bind(path)?;
     info!("Shell listener bound to {:?}", path);
