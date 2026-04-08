@@ -2,9 +2,9 @@
 
 This workspace uses Rust's built-in test runner through `cargo test`. Tests currently live in three places:
 
-- Unit tests inside source files with `#[cfg(test)]` modules, such as [crates/core/src/event.rs](/home/vansh5632/contextd/crates/core/src/event.rs) and [crates/sources/src/shell.rs](/home/vansh5632/contextd/crates/sources/src/shell.rs).
-- Shared test helpers in [crates/core/src/test_utils.rs](/home/vansh5632/contextd/crates/core/src/test_utils.rs).
-- Cross-module integration tests in [crates/store/tests/integration.rs](/home/vansh5632/contextd/crates/store/tests/integration.rs).
+- Unit tests inside source files with `#[cfg(test)]` modules, such as [crates/core/src/event.rs](crates/core/src/event.rs) and [crates/sources/src/shell.rs](crates/sources/src/shell.rs).
+- Shared test helpers in [crates/core/src/test_utils.rs](crates/core/src/test_utils.rs).
+- Cross-module integration tests in [crates/store/tests/integration.rs](crates/store/tests/integration.rs).
 
 ## Workspace Layout
 
