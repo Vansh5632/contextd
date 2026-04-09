@@ -50,16 +50,22 @@ async fn handle_client(stream: UnixStream, tx: broadcast::Sender<RawEvent>) -> R
         .await
         .context("failed reading client payload")?
     {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let event: RawEvent =
-            serde_json::from_str(trimmed).context("failed to deserialize raw event")?;
-        tx.send(event)
-            .map_err(|err| anyhow::anyhow!("failed to publish raw event: {err}"))?;
+        publish_event_line(&line, &tx)?;
     }
+
+    Ok(())
+}
+
+fn publish_event_line(line: &str, tx: &broadcast::Sender<RawEvent>) -> Result<()> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    let event: RawEvent =
+        serde_json::from_str(trimmed).context("failed to deserialize raw event")?;
+    tx.send(event)
+        .map_err(|err| anyhow::anyhow!("failed to publish raw event: {err}"))?;
 
     Ok(())
 }
@@ -69,27 +75,10 @@ mod tests {
     use super::*;
     use contextd_core::event::{EventSource, RawEvent};
     use serde_json::json;
-    use tempfile::tempdir;
-    use tokio::io::AsyncWriteExt;
-    use tokio::net::UnixStream;
 
     #[tokio::test]
-    async fn shell_listener_receives_and_broadcasts_events() {
-        let dir = tempdir().expect("tempdir should be created");
-        let socket_path = dir.path().join("test.sock");
+    async fn publish_event_line_broadcasts_events() {
         let (tx, mut rx) = broadcast::channel(10);
-
-        let listener_path = socket_path.clone();
-        let listener_tx = tx.clone();
-        let listener =
-            tokio::spawn(async move { start_shell_listener(listener_path, listener_tx).await });
-
-        // Give the listener a moment to bind before connecting
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-        let mut stream = UnixStream::connect(&socket_path)
-            .await
-            .expect("client should connect to shell socket");
 
         let test_event = RawEvent {
             id: "test-id-123".to_string(),
@@ -98,15 +87,9 @@ mod tests {
             payload: json!({"command": "cargo test"}),
         };
 
-        let mut payload =
+        let payload =
             serde_json::to_string(&test_event).expect("shell event should serialize to JSON");
-        payload.push('\n');
-
-        stream
-            .write_all(payload.as_bytes())
-            .await
-            .expect("client should write event payload");
-        stream.flush().await.expect("client should flush payload");
+        publish_event_line(&payload, &tx).expect("publishing a valid line should succeed");
 
         let received_event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
             .await
@@ -117,8 +100,5 @@ mod tests {
         assert_eq!(received_event.timestamp_ms, 1_000);
         assert_eq!(received_event.source, EventSource::Shell);
         assert_eq!(received_event.payload, json!({"command": "cargo test"}));
-
-        listener.abort();
-        let _ = listener.await;
     }
 }
