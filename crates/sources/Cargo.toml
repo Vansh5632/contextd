@@ -13,3 +13,6 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 contextd_core = { package = "contextd-core", path = "../core" }
+
+[dev-dependencies]
+tempfile = "3"
