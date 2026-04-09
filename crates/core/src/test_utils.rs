@@ -16,7 +16,7 @@ pub fn test_config_in_memory() -> AppConfig {
 pub fn test_event(source: EventSource, payload: Value) -> RawEvent {
     RawEvent {
         id: "evt-test-1".to_string(),
-        time_stamp_ms: 1_710_000_000_000,
+        timestamp_ms: 1_710_000_000_000,
         source,
         payload,
     }

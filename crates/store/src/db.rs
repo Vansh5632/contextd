@@ -1,4 +1,5 @@
 use contextd_core::config::AppConfig;
+use contextd_core::event::RawEvent;
 use rusqlite::{Connection, Result}; // Pulling from shared core models
 
 /// Initializes the database and runs the first migration
@@ -18,6 +19,25 @@ pub fn init_db(config: &AppConfig) -> Result<Connection> {
     )?;
 
     Ok(conn)
+}
+
+pub fn insert_event(conn: &Connection, event: &RawEvent) -> Result<()> {
+    // Convert the enum and JSON payload to strings for SQLite
+    let source_str =
+        serde_json::to_string(&event.source).unwrap_or_else(|_| "\"unknown\"".to_string());
+    let payload_str = serde_json::to_string(&event.payload).unwrap_or_else(|_| "{}".to_string());
+
+    conn.execute(
+        "INSERT INTO events (id, timestamp_ms, source, payload) VALUES (?1, ?2, ?3, ?4)",
+        (
+            &event.id,
+            event.timestamp_ms,
+            source_str.trim_matches('"'), // Remove the extra quotes serde adds to strings
+            payload_str,
+        ),
+    )?;
+
+    Ok(())
 }
 
 // ==========================================

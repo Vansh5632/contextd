@@ -21,7 +21,7 @@ fn init_db_allows_event_insert_round_trip() {
         "INSERT INTO events (id, timestamp_ms, source, payload) VALUES (?1, ?2, ?3, ?4)",
         (
             &event.id,
-            event.time_stamp_ms,
+            event.timestamp_ms,
             "shell",
             event.payload.to_string(),
         ),
@@ -41,7 +41,7 @@ fn init_db_allows_event_insert_round_trip() {
         .expect("row should exist");
 
     assert_eq!(row.0, event.id);
-    assert_eq!(row.1, event.time_stamp_ms);
+    assert_eq!(row.1, event.timestamp_ms);
     assert_eq!(row.2, "shell");
 }
 

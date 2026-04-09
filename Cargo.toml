@@ -1,8 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/core"
-, "crates/store"]
+    "crates/core",
+    "crates/store",
+    "crates/sources",
+    "bin/contextd"]
 
 [workspace.package]
 version     = "0.1.0"

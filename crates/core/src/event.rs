@@ -16,7 +16,8 @@ pub enum EventSource {
 pub struct RawEvent {
     pub id: String,
 
-    pub time_stamp_ms: u64,
+    #[serde(alias = "time_stamp_ms")]
+    pub timestamp_ms: u64,
 
     pub source: EventSource,
 
@@ -56,6 +57,7 @@ mod tests {
             "expected data error for unknown variant, got: {err}"
         );
 
+        let msg = err.to_string();
         assert!(msg.contains("unknown variant"));
     }
 
@@ -63,7 +65,7 @@ mod tests {
     fn raw_event_round_trip_preserves_fields() {
         let event = RawEvent {
             id: "evt-1".to_string(),
-            time_stamp_ms: 1_710_000_000_000,
+            timestamp_ms: 1_710_000_000_000,
             source: EventSource::Shell,
             payload: json!({"cmd": "ls", "exit_code": 0}),
         };
@@ -72,7 +74,7 @@ mod tests {
         let parsed: RawEvent = serde_json::from_str(&json).expect("raw event should deserialize");
 
         assert_eq!(parsed.id, event.id);
-        assert_eq!(parsed.time_stamp_ms, event.time_stamp_ms);
+        assert_eq!(parsed.timestamp_ms, event.timestamp_ms);
         assert_eq!(parsed.source, event.source);
         assert_eq!(parsed.payload, event.payload);
     }

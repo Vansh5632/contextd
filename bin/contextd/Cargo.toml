@@ -1,0 +1,19 @@
+[package]
+name = "contextd"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Internal workspace crates
+contextd_core = { package = "contextd-core", path = "../../crates/core" }
+store = { path = "../../crates/store" }
+sources = { path = "../../crates/sources" }
