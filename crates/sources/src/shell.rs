@@ -8,6 +8,8 @@ use tokio::{
 };
 use tracing::{info, warn};
 
+/// Starts a Unix domain socket listener that accepts connections from shell hooks,
+/// parses incoming JSON lines into RawEvents, and broadcasts them.
 pub async fn start_shell_listener(
     socket_path: PathBuf,
     tx: broadcast::Sender<RawEvent>,
@@ -23,7 +25,6 @@ pub async fn start_shell_listener(
 
     let listener = UnixListener::bind(&socket_path)
         .with_context(|| format!("failed to bind unix socket at {}", socket_path.display()))?;
-
     info!("Shell listener bound at {}", socket_path.display());
 
     loop {
