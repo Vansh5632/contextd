@@ -43,7 +43,13 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // 6. The Main Loop: Read from channel, write to DB
+    // 6. Start the process poller in the background
+    let proc_tx = tx.clone();
+    tokio::spawn(async move {
+        sources::proc_poller::start_proc_poller(proc_tx).await;
+    });
+
+    // 7. The Main Loop: Read from channel, write to DB
     info!("Daemon is running and listening for events.");
 
     loop {
