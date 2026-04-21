@@ -15,5 +15,6 @@ tracing-subscriber = { workspace = true }
 
 # Internal workspace crates
 contextd_core = { package = "contextd-core", path = "../../crates/core" }
+pipeline = { path = "../../crates/pipeline" }
 store = { path = "../../crates/store" }
 sources = { path = "../../crates/sources" }
