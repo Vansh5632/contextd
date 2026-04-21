@@ -55,11 +55,18 @@ async fn main() -> anyhow::Result<()> {
     loop {
         match rx.recv().await {
             Ok(event) => {
-                info!("Received event from {:?}: {}", event.source, event.id);
+                let processed_event = pipeline::heuristics::process_event(event);
+                info!(
+                    "Received event from {:?}: {} score={} payload={}",
+                    processed_event.raw.source,
+                    processed_event.raw.id,
+                    processed_event.score,
+                    processed_event.raw.payload
+                );
 
                 // Lock the database, insert, and unlock
                 let conn = db.lock().await;
-                if let Err(e) = store::db::insert_event(&conn, &event) {
+                if let Err(e) = store::db::insert_event(&conn, &processed_event) {
                     error!("Failed to write event to database: {}", e);
                 }
             }

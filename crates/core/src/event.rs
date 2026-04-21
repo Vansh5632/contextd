@@ -24,6 +24,12 @@ pub struct RawEvent {
     pub payload: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessedEvent {
+    pub raw: RawEvent,
+    pub score: f32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{EventSource, RawEvent};
