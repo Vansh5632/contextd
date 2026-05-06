@@ -12,18 +12,28 @@ use ulid::Ulid;
 const TARGET_PROCESSES: &[&str] = &["cargo", "node", "npm", "python", "docker", "rustc"];
 
 pub async fn start_proc_poller(tx: broadcast::Sender<RawEvent>) {
-    info!("Starting process poller (10s interval)");
+    info!("Starting process poller (1s interval)");
 
     // Initialize system information, specifically only asking for process data to save CPU
     let mut sys = System::new_with_specifics(
         RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
     );
 
-    let mut known_pids: HashSet<Pid> = HashSet::new();
-    let mut ticker = interval(Duration::from_secs(10));
+    let mut known_pids: HashSet<Pid> = sys
+        .processes()
+        .iter()
+        .filter_map(|(pid, process)| {
+            let name = process.name().to_lowercase();
+            TARGET_PROCESSES
+                .iter()
+                .any(|&target| name.contains(target))
+                .then_some(*pid)
+        })
+        .collect();
+    let mut ticker = interval(Duration::from_secs(1));
 
     loop {
-        // Wait for the next 10-second tick
+        // Wait for the next poll tick
         ticker.tick().await;
 
         // Refresh with full process metadata so command-line arguments stay populated.
