@@ -49,7 +49,16 @@ async fn main() -> anyhow::Result<()> {
         sources::proc_poller::start_proc_poller(proc_tx).await;
     });
 
-    // 7. The Main Loop: Read from channel, write to DB
+    // 7. Start the filesystem watcher in the background
+    let fs_tx = tx.clone();
+    let fs_root = std::env::current_dir()?;
+    tokio::spawn(async move {
+        if let Err(e) = sources::filesystem::start_filesystem_watcher(fs_root, fs_tx).await {
+            error!("Filesystem watcher crashed: {}", e);
+        }
+    });
+
+    // 8. The Main Loop: Read from channel, write to DB
     info!("Daemon is running and listening for events.");
 
     loop {

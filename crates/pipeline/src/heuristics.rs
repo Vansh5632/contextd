@@ -32,7 +32,17 @@ pub fn process_event(raw: RawEvent) -> ProcessedEvent {
         EventSource::Proc => {
             if let Some(action) = raw.payload.get("action").and_then(|v| v.as_str()) {
                 if action == "process_start" {
-                    0.7 // Starting a dev server is a strong intent signal
+                    let command = raw
+                        .payload
+                        .get("command")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+
+                    if command.contains("cargo build") || command.contains("npm run") {
+                        0.9
+                    } else {
+                        0.7 // Starting a dev server is a strong intent signal
+                    }
                 } else {
                     0.2
                 }
@@ -45,4 +55,57 @@ pub fn process_event(raw: RawEvent) -> ProcessedEvent {
     };
 
     ProcessedEvent { raw, score }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn raw(source: EventSource, payload: serde_json::Value) -> RawEvent {
+        RawEvent {
+            id: "test-event".to_string(),
+            timestamp_ms: 1_000,
+            source,
+            payload,
+        }
+    }
+
+    #[test]
+    fn cargo_build_process_start_scores_like_build_intent() {
+        let event = raw(
+            EventSource::Proc,
+            json!({
+                "action": "process_start",
+                "command": "/usr/bin/cargo build",
+                "process_name": "cargo"
+            }),
+        );
+
+        assert_eq!(process_event(event).score, 0.9);
+    }
+
+    #[test]
+    fn rustc_error_format_does_not_look_like_user_error_intent() {
+        let event = raw(
+            EventSource::Proc,
+            json!({
+                "action": "process_start",
+                "command": "/usr/bin/rustc --error-format=json",
+                "process_name": "rustc"
+            }),
+        );
+
+        assert_eq!(process_event(event).score, 0.7);
+    }
+
+    #[test]
+    fn cargo_toml_filesystem_event_scores_like_manifest_change() {
+        let event = raw(
+            EventSource::FileSystem,
+            json!({"path": "/repo/Cargo.toml", "action": "Modify(Metadata(Any))"}),
+        );
+
+        assert_eq!(process_event(event).score, 0.8);
+    }
 }
