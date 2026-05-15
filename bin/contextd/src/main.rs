@@ -1,7 +1,7 @@
 use contextd_core::config::AppConfig;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -29,6 +29,20 @@ async fn main() -> anyhow::Result<()> {
     let db_conn = store::db::init_db(&config)?;
     let db = Arc::new(Mutex::new(db_conn));
     info!("Database initialized at {:?}", config.db_path);
+
+    // AI features are optional: the daemon keeps running when Ollama is offline.
+    let ai_enabled = match ai::ollama::OllamaClient::new(None) {
+        Ok(client) => client.check_health().await,
+        Err(e) => {
+            warn!("Failed to initialize Ollama client: {}", e);
+            false
+        }
+    };
+    if ai_enabled {
+        info!("Ollama is online and reachable. AI Pipeline features are ENABLED.");
+    } else {
+        warn!("AI Pipeline features are DISABLED. Running in heuristics-only mode.");
+    }
 
     // 4. Create the central event bus (capacity of 100 events)
     let (tx, mut rx) = broadcast::channel(100);
