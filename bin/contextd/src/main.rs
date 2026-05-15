@@ -64,6 +64,12 @@ async fn main() -> anyhow::Result<()> {
         debug!("No Git repository found from current directory; skipping git hook installation");
     }
 
+    let manifest_rx = tx.subscribe();
+    let manifest_tx = tx.clone();
+    tokio::spawn(async move {
+        sources::manifest::start_manifest_watcher(manifest_rx, manifest_tx).await;
+    });
+
     tokio::spawn(async move {
         if let Err(e) = sources::filesystem::start_filesystem_watcher(fs_root, fs_tx).await {
             error!("Filesystem watcher crashed: {}", e);
