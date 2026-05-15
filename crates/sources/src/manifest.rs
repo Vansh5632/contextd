@@ -1,6 +1,10 @@
 use contextd_core::event::{EventSource, RawEvent};
 use serde_json::json;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    ffi::OsStr,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 use ulid::Ulid;
@@ -19,8 +23,7 @@ pub async fn start_manifest_watcher(
                 // We only care about FileSystem events
                 if event.source == EventSource::FileSystem {
                     if let Some(path_str) = event.payload.get("path").and_then(|v| v.as_str()) {
-                        // Did a core project file change?
-                        if path_str.ends_with("Cargo.toml") || path_str.ends_with("package.json") {
+                        if is_project_manifest_path(Path::new(path_str)) {
                             info!("Manifest change detected: {}", path_str);
 
                             // In a full implementation, you would use `std::fs::read_to_string` here,
@@ -28,11 +31,7 @@ pub async fn start_manifest_watcher(
                             // For now, we emit a structural event indicating the context shifted.
                             let derived_event = RawEvent {
                                 id: Ulid::new().to_string(),
-                                timestamp_ms: SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_millis()
-                                    as u64,
+                                timestamp_ms: current_timestamp_ms(),
                                 source: EventSource::Manifest,
                                 payload: json!({
                                     "action": "dependencies_updated",
@@ -62,6 +61,33 @@ pub async fn start_manifest_watcher(
     }
 }
 
+fn is_project_manifest_path(path: &Path) -> bool {
+    let Some(file_name) = path.file_name() else {
+        return false;
+    };
+
+    is_manifest_file_name(file_name) && !has_component(path, OsStr::new("node_modules"))
+}
+
+fn is_manifest_file_name(file_name: &OsStr) -> bool {
+    file_name == OsStr::new("Cargo.toml") || file_name == OsStr::new("package.json")
+}
+
+fn has_component(path: &Path, component: &OsStr) -> bool {
+    path.components()
+        .any(|path_component| path_component.as_os_str() == component)
+}
+
+fn current_timestamp_ms() -> u64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis() as u64,
+        Err(err) => {
+            warn!("system clock is before Unix epoch; using 0 for manifest event timestamp: {err}");
+            0
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +104,22 @@ mod tests {
                 "path": path
             }),
         }
+    }
+
+    #[test]
+    fn project_manifest_matching_requires_exact_file_name_and_skips_dependency_dirs() {
+        assert!(is_project_manifest_path(Path::new("/repo/Cargo.toml")));
+        assert!(is_project_manifest_path(Path::new(
+            "/repo/packages/web/package.json"
+        )));
+
+        assert!(!is_project_manifest_path(Path::new("/repo/myCargo.toml")));
+        assert!(!is_project_manifest_path(Path::new(
+            "/repo/foo-package.json"
+        )));
+        assert!(!is_project_manifest_path(Path::new(
+            "/repo/node_modules/pkg/package.json"
+        )));
     }
 
     #[tokio::test]
