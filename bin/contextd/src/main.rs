@@ -52,6 +52,10 @@ async fn main() -> anyhow::Result<()> {
     // 7. Start the filesystem watcher in the background
     let fs_tx = tx.clone();
     let fs_root = std::env::current_dir()?;
+    if let Err(e) = sources::git::install_hooks(&fs_root) {
+        error!("Failed to install git hooks: {}", e);
+    }
+
     tokio::spawn(async move {
         if let Err(e) = sources::filesystem::start_filesystem_watcher(fs_root, fs_tx).await {
             error!("Filesystem watcher crashed: {}", e);
