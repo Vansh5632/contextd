@@ -61,7 +61,10 @@ pub fn process_event(raw: RawEvent) -> ProcessedEvent {
                 0.5
             }
         }
-        // Fallback for Editor and Manifest until we build them
+        EventSource::Manifest => {
+            0.95 // Almost maximum importance — context is definitely changing
+        }
+        // Fallback for Editor until we build it
         _ => 0.5,
     };
 
@@ -119,6 +122,17 @@ mod tests {
 
         assert_eq!(process_event(event).score, 0.8);
     }
+
+    #[test]
+    fn derived_manifest_events_score_as_structural_changes() {
+        let event = raw(
+            EventSource::Manifest,
+            json!({"action": "dependencies_updated", "file": "/repo/Cargo.toml"}),
+        );
+
+        assert_eq!(process_event(event).score, 0.95);
+    }
+
     #[test]
     fn git_commit_scores_like_context_milestone() {
         let event = raw(
