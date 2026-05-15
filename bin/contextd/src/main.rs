@@ -31,7 +31,13 @@ async fn main() -> anyhow::Result<()> {
     info!("Database initialized at {:?}", config.db_path);
 
     // AI features are optional: the daemon keeps running when Ollama is offline.
-    let ai_enabled = ai::ollama::OllamaClient::new(None).check_health().await;
+    let ai_enabled = match ai::ollama::OllamaClient::new(None) {
+        Ok(client) => client.check_health().await,
+        Err(e) => {
+            warn!("Failed to initialize Ollama client: {}", e);
+            false
+        }
+    };
     if ai_enabled {
         info!("Ollama is online and reachable. AI Pipeline features are ENABLED.");
     } else {
