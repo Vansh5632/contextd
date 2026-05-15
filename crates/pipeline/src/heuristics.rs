@@ -50,7 +50,18 @@ pub fn process_event(raw: RawEvent) -> ProcessedEvent {
                 0.4
             }
         }
-        // Fallback for Git, Editor, Manifest until we build them
+        EventSource::Git => {
+            if let Some(action) = raw.payload.get("action").and_then(|v| v.as_str()) {
+                if action == "commit" || action == "checkout" {
+                    0.8 // Major context milestone
+                } else {
+                    0.5
+                }
+            } else {
+                0.5
+            }
+        }
+        // Fallback for Editor and Manifest until we build them
         _ => 0.5,
     };
 
@@ -104,6 +115,15 @@ mod tests {
         let event = raw(
             EventSource::FileSystem,
             json!({"path": "/repo/Cargo.toml", "action": "Modify(Metadata(Any))"}),
+        );
+
+        assert_eq!(process_event(event).score, 0.8);
+    }
+    #[test]
+    fn git_commit_scores_like_context_milestone() {
+        let event = raw(
+            EventSource::Git,
+            json!({"action": "commit", "hash": "abc123", "message": "feat: add git source"}),
         );
 
         assert_eq!(process_event(event).score, 0.8);

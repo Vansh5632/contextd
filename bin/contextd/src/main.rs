@@ -1,7 +1,7 @@
 use contextd_core::config::AppConfig;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -52,6 +52,18 @@ async fn main() -> anyhow::Result<()> {
     // 7. Start the filesystem watcher in the background
     let fs_tx = tx.clone();
     let fs_root = std::env::current_dir()?;
+    if let Some(git_root) = sources::git::find_git_root(&fs_root) {
+        if let Err(e) = sources::git::install_hooks(&git_root) {
+            error!(
+                "Failed to install git hooks in Git root {}: {}",
+                git_root.display(),
+                e
+            );
+        }
+    } else {
+        debug!("No Git repository found from current directory; skipping git hook installation");
+    }
+
     tokio::spawn(async move {
         if let Err(e) = sources::filesystem::start_filesystem_watcher(fs_root, fs_tx).await {
             error!("Filesystem watcher crashed: {}", e);
