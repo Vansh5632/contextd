@@ -119,7 +119,6 @@ mod tests {
 
         assert_eq!(process_event(event).score, 0.8);
     }
-
     #[test]
     fn git_commit_scores_like_context_milestone() {
         let event = raw(
