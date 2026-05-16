@@ -4,6 +4,8 @@ use std::time::Duration;
 use tracing::warn;
 
 const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434";
+const DEFAULT_EMBEDDING_MODEL: &str = "nomic-embed-text";
+const NOMIC_EMBED_TEXT_DIMENSIONS: usize = 768;
 
 #[derive(Serialize)]
 struct EmbeddingRequest<'a> {
@@ -62,12 +64,20 @@ impl OllamaClient {
         }
     }
 
-    /// Generates a vector embedding for the given text using nomic-embed-text.
-    /// Returns a Vec<f32> containing exactly 768 dimensions.
-    pub async fn get_embedding(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+    /// Generates a vector embedding for the given text.
+    ///
+    /// Uses [`DEFAULT_EMBEDDING_MODEL`] (`nomic-embed-text`) when `model` is `None`.
+    /// For the default model, returns exactly 768 dimensions or an error on mismatch.
+    /// Other models return the server vector without a fixed-size guarantee.
+    pub async fn get_embedding(
+        &self,
+        text: &str,
+        model: Option<&str>,
+    ) -> anyhow::Result<Vec<f32>> {
+        let model = model.unwrap_or(DEFAULT_EMBEDDING_MODEL);
         let url = format!("{}/api/embeddings", self.base_url);
         let req_body = EmbeddingRequest {
-            model: "nomic-embed-text",
+            model,
             prompt: text,
         };
 
@@ -80,7 +90,17 @@ impl OllamaClient {
         }
 
         let parsed: EmbeddingResponse = res.json().await?;
-        Ok(parsed.embedding)
+        let embedding = parsed.embedding;
+
+        if model == DEFAULT_EMBEDDING_MODEL && embedding.len() != NOMIC_EMBED_TEXT_DIMENSIONS {
+            return Err(anyhow::anyhow!(
+                "Ollama embedding dimension mismatch: expected {}, got {}",
+                NOMIC_EMBED_TEXT_DIMENSIONS,
+                embedding.len()
+            ));
+        }
+
+        Ok(embedding)
     }
 }
 
@@ -125,10 +145,9 @@ mod tests {
         );
 
         let text_to_embed = "I am debugging a TypeError in my TypeScript React application.";
-        let embedding = client.get_embedding(text_to_embed).await.unwrap();
+        let embedding = client.get_embedding(text_to_embed, None).await.unwrap();
 
-        // nomic-embed-text always returns exactly 768 dimensions
-        assert_eq!(embedding.len(), 768);
+        assert_eq!(embedding.len(), NOMIC_EMBED_TEXT_DIMENSIONS);
 
         // Print the first 5 numbers just to see what an embedding actually looks like!
         println!("First 5 dimensions: {:?}", &embedding[0..5]);
