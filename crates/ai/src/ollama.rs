@@ -69,11 +69,7 @@ impl OllamaClient {
     /// Uses [`DEFAULT_EMBEDDING_MODEL`] (`nomic-embed-text`) when `model` is `None`.
     /// For the default model, returns exactly 768 dimensions or an error on mismatch.
     /// Other models return the server vector without a fixed-size guarantee.
-    pub async fn get_embedding(
-        &self,
-        text: &str,
-        model: Option<&str>,
-    ) -> anyhow::Result<Vec<f32>> {
+    pub async fn get_embedding(&self, text: &str, model: Option<&str>) -> anyhow::Result<Vec<f32>> {
         let model = model.unwrap_or(DEFAULT_EMBEDDING_MODEL);
         let url = format!("{}/api/embeddings", self.base_url);
         let req_body = EmbeddingRequest {
