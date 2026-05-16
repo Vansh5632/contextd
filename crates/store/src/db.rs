@@ -2,18 +2,9 @@ use contextd_core::config::AppConfig;
 use contextd_core::event::ProcessedEvent;
 use rusqlite::{Connection, Result}; // Pulling from shared core models
 
-/// Registers sqlite-vec with rusqlite's bundled SQLite before opening connections.
-fn register_sqlite_vec() {
-    unsafe {
-        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
-            sqlite_vec::sqlite3_vec_init as *const (),
-        )));
-    }
-}
-
 /// Initializes the database and runs the first migration
 pub fn init_db(config: &AppConfig) -> Result<Connection> {
-    register_sqlite_vec();
+    crate::vector::register_vec_extension();
     let conn = Connection::open(&config.db_path)?;
     // Create our base table
     conn.execute(

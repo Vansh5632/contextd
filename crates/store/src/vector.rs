@@ -1,38 +1,63 @@
 use rusqlite::{params, Connection, Result};
 
-/// Safely converts an array of f32s into a raw byte vector for SQLite BLOB storage.
+pub const EMBEDDING_DIMENSIONS: usize = 768;
+
+static REGISTER_SQLITE_VEC: std::sync::Once = std::sync::Once::new();
+
+/// Registers sqlite-vec with rusqlite's bundled SQLite before opening connections.
+#[allow(clippy::missing_transmute_annotations)]
+pub fn register_vec_extension() {
+    REGISTER_SQLITE_VEC.call_once(|| unsafe {
+        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+            sqlite_vec::sqlite3_vec_init as *const (),
+        )));
+    });
+}
+
+/// Converts f32 embeddings to little-endian bytes for portable SQLite BLOB storage.
 fn f32_to_bytes(vec: &[f32]) -> Vec<u8> {
-    vec.iter().flat_map(|&f| f.to_ne_bytes()).collect()
+    vec.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
+
+fn validate_embedding_dimensions(embedding: &[f32]) -> Result<()> {
+    if embedding.len() != EMBEDDING_DIMENSIONS {
+        return Err(rusqlite::Error::InvalidParameterCount(
+            EMBEDDING_DIMENSIONS,
+            embedding.len(),
+        ));
+    }
+    Ok(())
 }
 
 /// Saves an embedding tied to a specific event ID.
 pub fn insert_embedding(conn: &Connection, event_id: &str, embedding: &[f32]) -> Result<()> {
+    validate_embedding_dimensions(embedding)?;
     let blob = f32_to_bytes(embedding);
-    
+
     conn.execute(
         "INSERT INTO vec_events (event_id, embedding) VALUES (?1, ?2)",
         params![event_id, blob],
     )?;
-    
+
     Ok(())
 }
 
-/// Performs a semantic search using cosine distance. 
+/// Performs a semantic search using cosine distance.
 /// Returns a list of (event_id, distance). Lower distance = higher similarity.
 pub fn search_similar_events(
-    conn: &Connection, 
-    query_embedding: &[f32], 
-    limit: usize
+    conn: &Connection,
+    query_embedding: &[f32],
+    limit: usize,
 ) -> Result<Vec<(String, f32)>> {
+    validate_embedding_dimensions(query_embedding)?;
     let blob = f32_to_bytes(query_embedding);
-    
-    // sqlite-vec uses the MATCH syntax for K-Nearest Neighbors (KNN) search
+
     let mut stmt = conn.prepare(
         "SELECT event_id, distance
          FROM vec_events
          WHERE embedding MATCH ?1
          ORDER BY distance
-         LIMIT ?2"
+         LIMIT ?2",
     )?;
 
     let rows = stmt.query_map(params![blob, limit], |row| {
@@ -45,14 +70,10 @@ pub fn search_similar_events(
     for row in rows {
         results.push(row?);
     }
-    
+
     Ok(results)
 }
 
-
-// ==========================================
-// TESTS
-// ==========================================
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,35 +83,42 @@ mod tests {
     fn test_vector_insertion_and_search() {
         let conn = crate::db::init_db(&test_config_in_memory()).unwrap();
 
-        // Create some dummy 768-dimensional embeddings
-        let mut embed_1 = vec![0.0f32; 768];
-        embed_1[0] = 1.0; // Make this one point strongly in dimension 0
+        let mut embed_1 = vec![0.0f32; EMBEDDING_DIMENSIONS];
+        embed_1[0] = 1.0;
 
-        let mut embed_2 = vec![0.0f32; 768];
-        embed_2[0] = 0.9; // Very similar to embed_1
+        let mut embed_2 = vec![0.0f32; EMBEDDING_DIMENSIONS];
+        embed_2[0] = 0.9;
         embed_2[1] = 0.1;
 
-        let mut embed_3 = vec![0.0f32; 768];
-        embed_3[500] = 1.0; // Completely different
+        let mut embed_3 = vec![0.0f32; EMBEDDING_DIMENSIONS];
+        embed_3[500] = 1.0;
 
-        // 2. Act: Insert them
         insert_embedding(&conn, "event-1", &embed_1).unwrap();
         insert_embedding(&conn, "event-2", &embed_2).unwrap();
         insert_embedding(&conn, "event-3", &embed_3).unwrap();
 
-        // 3. Search: Find matches for embed_1
         let results = search_similar_events(&conn, &embed_1, 2).unwrap();
 
-        // 4. Assert
         assert_eq!(results.len(), 2);
-        
-        // The closest match should be event-1 (distance 0.0)
         assert_eq!(results[0].0, "event-1");
-        
-        // The second closest should be event-2
         assert_eq!(results[1].0, "event-2");
-        
-        // It should NOT return event-3 because we limited to 2 results, 
-        // and event-3 was mathematically far away.
+    }
+
+    #[test]
+    fn rejects_wrong_embedding_dimensions() {
+        let conn = crate::db::init_db(&test_config_in_memory()).unwrap();
+        let short = vec![0.1_f32; 4];
+
+        let err = insert_embedding(&conn, "event-bad", &short).unwrap_err();
+        assert!(matches!(
+            err,
+            rusqlite::Error::InvalidParameterCount(768, 4)
+        ));
+
+        let search_err = search_similar_events(&conn, &short, 1).unwrap_err();
+        assert!(matches!(
+            search_err,
+            rusqlite::Error::InvalidParameterCount(768, 4)
+        ));
     }
 }
