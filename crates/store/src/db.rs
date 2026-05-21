@@ -63,6 +63,65 @@ pub fn insert_event(conn: &Connection, event: &ProcessedEvent) -> Result<()> {
     Ok(())
 }
 
+pub fn get_recent_events(conn: &Connection, limit: usize) -> Result<Vec<ProcessedEvent>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, timestamp_ms, source, payload, score 
+         FROM events 
+         ORDER BY timestamp_ms DESC 
+         LIMIT ?1"
+    )?;
+    
+    let rows = stmt.query_map([limit], |row| {
+        let source_str: String = row.get(2)?;
+        let payload_str: String = row.get(3)?;
+        
+        Ok(ProcessedEvent {
+            raw: contextd_core::event::RawEvent {
+                id: row.get(0)?,
+                timestamp_ms: row.get(1)?,
+                // We add quotes back because serde expects enum JSON strings to be quoted
+                source: serde_json::from_str(&format!("\"{}\"", source_str))
+                    .unwrap_or(contextd_core::event::EventSource::Shell),
+                payload: serde_json::from_str(&payload_str).unwrap_or_default(),
+            },
+            score: row.get(4)?,
+        })
+    })?;
+
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
+pub fn get_event_by_id(conn: &Connection, id: &str) -> Result<Option<ProcessedEvent>> {
+    let mut stmt = conn.prepare(
+        "SELECT timestamp_ms, source, payload, score 
+         FROM events WHERE id = ?1"
+    )?;
+    
+    let mut rows = stmt.query([id])?;
+    
+    if let Some(row) = rows.next()? {
+        let source_str: String = row.get(1)?;
+        let payload_str: String = row.get(2)?;
+        
+        Ok(Some(ProcessedEvent {
+            raw: contextd_core::event::RawEvent {
+                id: id.to_string(),
+                timestamp_ms: row.get(0)?,
+                source: serde_json::from_str(&format!("\"{}\"", source_str))
+                    .unwrap_or(contextd_core::event::EventSource::Shell),
+                payload: serde_json::from_str(&payload_str).unwrap_or_default(),
+            },
+            score: row.get(3)?,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
 // ==========================================
 // TESTS
 // ==========================================
