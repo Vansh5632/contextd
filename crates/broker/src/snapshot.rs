@@ -1,8 +1,9 @@
+use ai::ollama::OllamaClient;
 use contextd_core::event::ProcessedEvent;
 use serde::Serialize;
-use ai::ollama::OllamaClient;
 use store::db::{get_event_by_id, get_recent_events};
 use store::vector::search_similar_events;
+use tracing::warn;
 
 /// The final payload that will be delivered to external LLMs (like Cursor or Claude)
 #[derive(Debug, Serialize)]
@@ -20,26 +21,35 @@ pub async fn generate_snapshot(
     ai_client: &OllamaClient,
     query: &str,
 ) -> anyhow::Result<ContextSnapshot> {
-    
     // 1. Get chronological context (Tier 0)
     let recent_activity = get_recent_events(db_conn, 10)?;
 
     // 2. Get semantic context (Tier 1)
     let mut relevant_history = Vec::new();
-    
-    // Generate an embedding for the user's query
-    if let Ok(query_embedding) = ai_client.get_embedding(query, None).await {
-        // Search the vector DB for the top 5 closest matches
-        if let Ok(matches) = search_similar_events(db_conn, &query_embedding, 5) {
-            for (id, _distance) in matches {
-                // Fetch the full event data for the matched IDs
-                if let Ok(Some(event)) = get_event_by_id(db_conn, &id) {
-                    // Prevent duplicates if a recent event is also a semantic match
-                    if !recent_activity.iter().any(|e| e.raw.id == id) {
-                        relevant_history.push(event);
+
+    match ai_client.get_embedding(query, None).await {
+        Ok(query_embedding) => match search_similar_events(db_conn, &query_embedding, 5) {
+            Ok(matches) => {
+                for (id, _distance) in matches {
+                    if let Ok(Some(event)) = get_event_by_id(db_conn, &id) {
+                        if !recent_activity.iter().any(|e| e.raw.id == id) {
+                            relevant_history.push(event);
+                        }
                     }
                 }
             }
+            Err(err) => {
+                warn!(
+                    error = ?err,
+                    "semantic search failed when building context snapshot; continuing without semantic matches"
+                );
+            }
+        },
+        Err(err) => {
+            warn!(
+                error = ?err,
+                "failed to generate query embedding for semantic context; continuing without semantic matches"
+            );
         }
     }
 
@@ -48,7 +58,6 @@ pub async fn generate_snapshot(
         relevant_history,
     })
 }
-
 
 // ==========================================
 // TESTS
@@ -90,7 +99,7 @@ mod tests {
         let config = AppConfig::default();
         store::vector::register_vec_extension();
         let conn = Connection::open(&config.db_path).unwrap();
-        
+
         let ai_client = OllamaClient::new(None).expect("failed to create Ollama client");
         assert!(ai_client.check_health().await, "Ollama must be running");
 
@@ -99,7 +108,7 @@ mod tests {
 
         // Ask the broker a question based on what you were doing earlier!
         let query = "dependency changes in Cargo.toml";
-        
+
         let snapshot = generate_snapshot(&conn, &ai_client, query).await.unwrap();
 
         println!("--- RECENT ACTIVITY (Top 3) ---");
@@ -109,9 +118,10 @@ mod tests {
 
         println!("\n--- SEMANTIC MATCHES for '{}' ---", query);
         for event in snapshot.relevant_history {
-            println!("[{:?}] Score: {:.2} | Payload: {}", 
-                event.raw.source, 
-                event.score, 
+            println!(
+                "[{:?}] Score: {:.2} | Payload: {}",
+                event.raw.source,
+                event.score,
                 serde_json::to_string(&event.raw.payload).unwrap()
             );
         }

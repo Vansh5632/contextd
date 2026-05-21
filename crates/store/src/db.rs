@@ -21,7 +21,7 @@ pub fn init_db(config: &AppConfig) -> Result<Connection> {
     conn.execute(
         "CREATE VIRTUAL TABLE IF NOT EXISTS vec_events USING vec0(
             event_id TEXT PRIMARY KEY,
-            embedding float[768]
+            embedding float[768] distance_metric=cosine
         )",
         (),
     )?;
@@ -68,13 +68,13 @@ pub fn get_recent_events(conn: &Connection, limit: usize) -> Result<Vec<Processe
         "SELECT id, timestamp_ms, source, payload, score 
          FROM events 
          ORDER BY timestamp_ms DESC 
-         LIMIT ?1"
+         LIMIT ?1",
     )?;
-    
+
     let rows = stmt.query_map([limit], |row| {
         let source_str: String = row.get(2)?;
         let payload_str: String = row.get(3)?;
-        
+
         Ok(ProcessedEvent {
             raw: contextd_core::event::RawEvent {
                 id: row.get(0)?,
@@ -98,15 +98,15 @@ pub fn get_recent_events(conn: &Connection, limit: usize) -> Result<Vec<Processe
 pub fn get_event_by_id(conn: &Connection, id: &str) -> Result<Option<ProcessedEvent>> {
     let mut stmt = conn.prepare(
         "SELECT timestamp_ms, source, payload, score 
-         FROM events WHERE id = ?1"
+         FROM events WHERE id = ?1",
     )?;
-    
+
     let mut rows = stmt.query([id])?;
-    
+
     if let Some(row) = rows.next()? {
         let source_str: String = row.get(1)?;
         let payload_str: String = row.get(2)?;
-        
+
         Ok(Some(ProcessedEvent {
             raw: contextd_core::event::RawEvent {
                 id: id.to_string(),
