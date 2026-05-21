@@ -4,9 +4,8 @@ use rusqlite::{Connection, Result}; // Pulling from shared core models
 
 /// Initializes the database and runs the first migration
 pub fn init_db(config: &AppConfig) -> Result<Connection> {
-    // Open a connection using the path from our config
+    crate::vector::register_vec_extension();
     let conn = Connection::open(&config.db_path)?;
-
     // Create our base table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS events (
@@ -19,6 +18,13 @@ pub fn init_db(config: &AppConfig) -> Result<Connection> {
         (), // No parameters needed for this query
     )?;
 
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS vec_events USING vec0(
+            event_id TEXT PRIMARY KEY,
+            embedding float[768]
+        )",
+        (),
+    )?;
     let has_score_column = conn
         .prepare("PRAGMA table_info(events)")?
         .query_map([], |row| row.get::<_, String>(1))?
