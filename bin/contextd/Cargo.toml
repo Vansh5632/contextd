@@ -19,3 +19,4 @@ pipeline = { path = "../../crates/pipeline" }
 store = { path = "../../crates/store" }
 sources = { path = "../../crates/sources" }
 ai = { path = "../../crates/ai" }
+background = { path = "../../crates/background" }

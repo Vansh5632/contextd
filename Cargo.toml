@@ -4,7 +4,7 @@ members = [
     "crates/core",
     "crates/store",
     "crates/sources",
-    "bin/contextd", "crates/pipeline", "crates/ai"]
+    "bin/contextd", "crates/pipeline", "crates/ai", "crates/background"]
 
 [workspace.package]
 version     = "0.1.0"

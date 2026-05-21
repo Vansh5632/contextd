@@ -90,6 +90,11 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    let pruner_db = Arc::clone(&db);
+    tokio::spawn(async move {
+        background::pruner::start_pruning_worker(pruner_db).await;
+    });
+
     // 8. The Main Loop: Read from channel, write to DB
     info!("Daemon is running and listening for events.");
 
