@@ -2,7 +2,8 @@ use contextd_core::config::AppConfig;
 use contextd_core::event::{EventSource, ProcessedEvent};
 use contextd_core::test_utils::{test_config_in_memory, test_shell_event};
 use std::time::{SystemTime, UNIX_EPOCH};
-use store::db::{init_db, insert_event};
+use store::db::{init_db, insert_event, prune_old_events};
+use store::vector::{insert_embedding, search_similar_events, EMBEDDING_DIMENSIONS};
 
 fn unique_suffix() -> u128 {
     SystemTime::now()
@@ -160,4 +161,61 @@ fn event_source_model_remains_compatible() {
     let encoded = serde_json::to_string(&source).expect("event source should serialize");
 
     assert_eq!(encoded, "\"shell\"");
+}
+
+fn processed(id: &str, timestamp_ms: u64, score: f32) -> ProcessedEvent {
+    let mut event = test_shell_event();
+    event.id = id.to_string();
+    event.timestamp_ms = timestamp_ms;
+    ProcessedEvent { raw: event, score }
+}
+
+#[test]
+fn prune_old_events_deletes_stale_low_score_rows_and_keeps_recent_or_important() {
+    let cfg = test_config_in_memory();
+    let conn = init_db(&cfg).expect("db should initialize");
+
+    insert_event(&conn, &processed("old-trivial", 1_000, 0.2)).unwrap();
+    insert_event(&conn, &processed("old-important", 1_000, 0.9)).unwrap();
+    insert_event(&conn, &processed("fresh-trivial", 9_000, 0.1)).unwrap();
+
+    let deleted = prune_old_events(&conn, 5_000, 0.5).expect("prune should succeed");
+    assert_eq!(deleted, 1);
+
+    let remaining: Vec<String> = conn
+        .prepare("SELECT id FROM events ORDER BY id")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+
+    assert_eq!(
+        remaining,
+        vec!["fresh-trivial".to_string(), "old-important".to_string()]
+    );
+}
+
+#[test]
+fn prune_old_events_removes_orphaned_embeddings() {
+    let cfg = test_config_in_memory();
+    let conn = init_db(&cfg).expect("db should initialize");
+
+    insert_event(&conn, &processed("keep-me", 9_000, 0.9)).unwrap();
+    insert_event(&conn, &processed("drop-me", 1_000, 0.1)).unwrap();
+
+    let mut keep_vec = vec![0.0f32; EMBEDDING_DIMENSIONS];
+    keep_vec[0] = 1.0;
+    let mut drop_vec = vec![0.0f32; EMBEDDING_DIMENSIONS];
+    drop_vec[1] = 1.0;
+
+    insert_embedding(&conn, "keep-me", &keep_vec).unwrap();
+    insert_embedding(&conn, "drop-me", &drop_vec).unwrap();
+
+    let deleted = prune_old_events(&conn, 5_000, 0.5).expect("prune should succeed");
+    assert_eq!(deleted, 1);
+
+    let results = search_similar_events(&conn, &keep_vec, 10).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].0, "keep-me");
 }

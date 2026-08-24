@@ -63,15 +63,14 @@ pub fn insert_event(conn: &Connection, event: &ProcessedEvent) -> Result<()> {
     Ok(())
 }
 
-
 /// Deletes events older than a certain timestamp that have a score below the threshold.
 /// Returns the number of rows deleted.
 pub fn prune_old_events(
-    conn: &Connection, 
-    cutoff_timestamp_ms: u64, 
-    score_threshold: f32
+    conn: &Connection,
+    cutoff_timestamp_ms: u64,
+    score_threshold: f32,
 ) -> Result<usize> {
-    // Note: In a real system we'd archive these to Tier 3 (zstd blob), 
+    // Note: In a real system we'd archive these to Tier 3 (zstd blob),
     // but for now, we will just strictly delete them to save disk space.
     let deleted = conn.execute(
         "DELETE FROM events WHERE timestamp_ms < ?1 AND score < ?2",
