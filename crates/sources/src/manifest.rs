@@ -21,29 +21,28 @@ pub async fn start_manifest_watcher(
         match rx.recv().await {
             Ok(event) => {
                 // We only care about FileSystem events
-                if event.source == EventSource::FileSystem {
-                    if let Some(path_str) = event.payload.get("path").and_then(|v| v.as_str()) {
-                        if is_project_manifest_path(Path::new(path_str)) {
-                            info!("Manifest change detected: {}", path_str);
+                if event.source == EventSource::FileSystem
+                    && let Some(path_str) = event.payload.get("path").and_then(|v| v.as_str())
+                    && is_project_manifest_path(Path::new(path_str))
+                {
+                    info!("Manifest change detected: {}", path_str);
 
-                            // In a full implementation, you would use `std::fs::read_to_string` here,
-                            // parse the TOML/JSON, and diff the dependencies.
-                            // For now, we emit a structural event indicating the context shifted.
-                            let derived_event = RawEvent {
-                                id: Ulid::new().to_string(),
-                                timestamp_ms: current_timestamp_ms(),
-                                source: EventSource::Manifest,
-                                payload: json!({
-                                    "action": "dependencies_updated",
-                                    "file": path_str
-                                }),
-                            };
+                    // In a full implementation, you would use `std::fs::read_to_string` here,
+                    // parse the TOML/JSON, and diff the dependencies.
+                    // For now, we emit a structural event indicating the context shifted.
+                    let derived_event = RawEvent {
+                        id: Ulid::new().to_string(),
+                        timestamp_ms: current_timestamp_ms(),
+                        source: EventSource::Manifest,
+                        payload: json!({
+                            "action": "dependencies_updated",
+                            "file": path_str
+                        }),
+                    };
 
-                            // Inject the new event back into the pipeline
-                            if let Err(e) = tx.send(derived_event) {
-                                warn!("Failed to broadcast manifest event: {}", e);
-                            }
-                        }
+                    // Inject the new event back into the pipeline
+                    if let Err(e) = tx.send(derived_event) {
+                        warn!("Failed to broadcast manifest event: {}", e);
                     }
                 }
             }

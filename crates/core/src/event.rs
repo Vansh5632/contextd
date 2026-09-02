@@ -28,6 +28,51 @@ pub struct RawEvent {
 pub struct ProcessedEvent {
     pub raw: RawEvent,
     pub score: f32,
+
+    /// Which burst of work this belongs to. `None` on events restored from a
+    /// database written before sessions existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+
+    /// Everything below is filled in later, off the hot path, and may stay
+    /// `None` forever if the local model is not running. Nothing in the product
+    /// is allowed to require these.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_case: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+impl ProcessedEvent {
+    /// A scored event with no enrichment yet. This is what the hot path produces.
+    pub fn new(raw: RawEvent, score: f32) -> Self {
+        Self {
+            raw,
+            score,
+            session_id: None,
+            use_case: None,
+            memory_type: None,
+            summary: None,
+        }
+    }
+
+    pub fn with_session(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
+    }
+}
+
+/// What the user says they are trying to do, in their own words.
+///
+/// Observations tell us what happened; an intent tells us why. The broker puts
+/// the two side by side so a briefing stays on track instead of just listing
+/// the last ten file saves.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Intent {
+    pub text: String,
+    pub declared_at_ms: u64,
 }
 
 #[cfg(test)]

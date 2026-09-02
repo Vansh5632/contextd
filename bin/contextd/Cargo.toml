@@ -12,11 +12,16 @@ anyhow = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+ulid = { workspace = true }
 
 # Internal workspace crates
 contextd_core = { package = "contextd-core", path = "../../crates/core" }
 pipeline = { path = "../../crates/pipeline" }
 store = { path = "../../crates/store" }
+memory = { path = "../../crates/memory" }
 sources = { path = "../../crates/sources" }
 ai = { path = "../../crates/ai" }
 background = { path = "../../crates/background" }
+broker = { path = "../../crates/broker" }
+mcp = { path = "../../crates/mcp" }

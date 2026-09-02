@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{Connection, Result, params};
 
 pub const EMBEDDING_DIMENSIONS: usize = 768;
 
@@ -30,10 +30,19 @@ fn validate_embedding_dimensions(embedding: &[f32]) -> Result<()> {
 }
 
 /// Saves an embedding tied to a specific event ID.
+///
+/// Idempotent: re-embedding an event replaces its vector. The enrichment
+/// backlog can legitimately hand us the same event twice — a crash between
+/// writing the vector and marking the row done leaves it queued — and that
+/// should not be an error.
 pub fn insert_embedding(conn: &Connection, event_id: &str, embedding: &[f32]) -> Result<()> {
     validate_embedding_dimensions(embedding)?;
     let blob = f32_to_bytes(embedding);
 
+    conn.execute(
+        "DELETE FROM vec_events WHERE event_id = ?1",
+        params![event_id],
+    )?;
     conn.execute(
         "INSERT INTO vec_events (event_id, embedding) VALUES (?1, ?2)",
         params![event_id, blob],
