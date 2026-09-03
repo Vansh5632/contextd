@@ -4,15 +4,22 @@ members = [
     "crates/core",
     "crates/store",
     "crates/sources",
-    "bin/contextd", "crates/pipeline", "crates/ai"]
+    "crates/broker",
+    "crates/mcp",
+    "crates/memory",
+    "crates/pipeline",
+    "crates/ai",
+    "crates/background",
+    "bin/contextd",
+]
 
 [workspace.package]
 version     = "0.1.0"
-edition     = "2021"
+edition     = "2024"
 authors     = ["Your Name"]
 license     = "MIT OR Apache-2.0"
 repository  = "https://github.com/vansh5632/contextd"
-rust-version = "1.80"
+rust-version = "1.88"
 
 # Shared deps — every crate inherits from here, no version drift
 [workspace.dependencies]
@@ -45,6 +52,10 @@ petgraph     = "0.6"
 
 # HTTP client (for Ollama)
 reqwest      = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# MCP (Model Context Protocol) — official Rust SDK
+rmcp         = { version = "3.2", features = ["server", "transport-io"] }
+schemars     = "1"
 
 # Compression (for Tier 3 blobs)
 zstd         = "0.13"

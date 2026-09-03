@@ -1,6 +1,6 @@
 use crate::config::AppConfig;
 use crate::event::{EventSource, RawEvent};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 /// Returns an AppConfig tuned for deterministic tests.
@@ -9,6 +9,7 @@ pub fn test_config_in_memory() -> AppConfig {
         db_path: PathBuf::from(":memory:"),
         socket_path: PathBuf::from("/tmp/contextd/test.sock"),
         max_memory_mb: 64,
+        ..AppConfig::default()
     }
 }
 

@@ -68,7 +68,7 @@ pub fn process_event(raw: RawEvent) -> ProcessedEvent {
         _ => 0.5,
     };
 
-    ProcessedEvent { raw, score }
+    ProcessedEvent::new(raw, score)
 }
 
 #[cfg(test)]
