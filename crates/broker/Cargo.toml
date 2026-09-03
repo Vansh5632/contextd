@@ -1,0 +1,20 @@
+[package]
+name = "broker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rusqlite = { workspace = true }
+
+contextd_core = { package = "contextd-core", path = "../core" }
+store = { path = "../store" }
+memory = { path = "../memory" }
+pipeline = { path = "../pipeline" }
+ai = { path = "../ai" }

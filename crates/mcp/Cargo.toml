@@ -1,17 +1,17 @@
 [package]
-name = "contextd-core"
+name = "mcp"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
-[lib]
-name = "contextd_core"
-
 [dependencies]
+anyhow = { workspace = true }
+rmcp = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-toml = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
+
+contextd_core = { package = "contextd-core", path = "../core" }
