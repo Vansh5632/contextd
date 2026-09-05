@@ -12,6 +12,7 @@
 
 #[cfg(unix)]
 use std::fs;
+use std::io;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -132,19 +133,96 @@ pub fn find_git_root(start: impl AsRef<Path>) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+/// The git directory for a `.git` path (directory or gitfile).
+///
+/// Matches Git's `resolve_gitdir`: a directory is used as-is; a gitfile's
+/// `gitdir:` value is absolute as written, or resolved against the directory
+/// that contains the gitfile — never against process CWD.
+fn resolve_git_dir(git: &Path) -> io::Result<PathBuf> {
+    if git.is_dir() {
+        return Ok(git.to_path_buf());
+    }
+    if git.is_file() {
+        let text = std::fs::read_to_string(git)?;
+        let pointed = text
+            .lines()
+            .find_map(|line| line.strip_prefix("gitdir:"))
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{} has no gitdir: line", git.display()),
+                )
+            })?;
+        let pointed = Path::new(pointed);
+        let gitdir = if pointed.is_absolute() {
+            pointed.to_path_buf()
+        } else {
+            git.parent()
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("{} has no parent directory", git.display()),
+                    )
+                })?
+                .join(pointed)
+        };
+        if !gitdir.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "gitdir {} does not exist (from {})",
+                    gitdir.display(),
+                    git.display()
+                ),
+            ));
+        }
+        return Ok(gitdir);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("no .git directory or file at {}", git.display()),
+    ))
+}
+
+/// Git's common dir: `$GIT_DIR` unless `$GIT_DIR/commondir` says otherwise.
+/// Relative commondir values are relative to `$GIT_DIR`.
+fn git_common_dir(git_dir: &Path) -> PathBuf {
+    match std::fs::read_to_string(git_dir.join("commondir")) {
+        Ok(contents) => git_dir.join(contents.trim()),
+        Err(_) => git_dir.to_path_buf(),
+    }
+}
+
+/// Where git actually keeps hooks for this working tree.
+///
+/// A normal repo has `.git/hooks`. A linked worktree or submodule has a
+/// `.git` *file* pointing at the real git dir; worktree hooks live in the
+/// common directory, submodule hooks live in `.git/modules/<name>/hooks`.
+pub fn git_hooks_dir(repo_path: impl AsRef<Path>) -> io::Result<PathBuf> {
+    let git_dir = resolve_git_dir(&repo_path.as_ref().join(".git"))?;
+    Ok(git_common_dir(&git_dir).join("hooks"))
+}
+
 /// Install every contextd hook into a repository.
 ///
 /// Safe to run repeatedly, and safe to run on a repository with its own hooks.
+/// Returns an error if the hooks directory cannot be resolved or does not
+/// exist: callers must not treat a skip as success.
 #[cfg(unix)]
-pub fn install_hooks(repo_path: impl AsRef<Path>, socket_path: &Path) -> std::io::Result<()> {
-    let hooks_dir = repo_path.as_ref().join(".git/hooks");
+pub fn install_hooks(repo_path: impl AsRef<Path>, socket_path: &Path) -> io::Result<()> {
+    let hooks_dir = git_hooks_dir(repo_path.as_ref())?;
 
     if !hooks_dir.exists() {
-        warn!(
-            "Not a git repository (or no hooks dir): {:?}",
-            repo_path.as_ref()
-        );
-        return Ok(()); // Fail gracefully if they run the daemon outside a repo
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "git hooks directory does not exist at {} (looked up from {})",
+                hooks_dir.display(),
+                repo_path.as_ref().display()
+            ),
+        ));
     }
 
     for spec in HOOKS {
@@ -156,7 +234,7 @@ pub fn install_hooks(repo_path: impl AsRef<Path>, socket_path: &Path) -> std::io
 }
 
 #[cfg(unix)]
-fn install_one(hooks_dir: &Path, spec: &HookSpec, socket_path: &Path) -> std::io::Result<()> {
+fn install_one(hooks_dir: &Path, spec: &HookSpec, socket_path: &Path) -> io::Result<()> {
     let hook_path = hooks_dir.join(spec.name);
     let backup_path = hooks_dir.join(backup_name(spec.name));
 
@@ -199,7 +277,7 @@ fn is_contextd_hook(contents: &str) -> bool {
 
 /// Non-Unix platforms do not support the Unix-domain socket hook path yet.
 #[cfg(not(unix))]
-pub fn install_hooks(repo_path: impl AsRef<Path>, _socket_path: &Path) -> std::io::Result<()> {
+pub fn install_hooks(repo_path: impl AsRef<Path>, _socket_path: &Path) -> io::Result<()> {
     warn!(
         "Git hook installation is not supported on this platform: {:?}",
         repo_path.as_ref()
@@ -211,6 +289,16 @@ pub fn install_hooks(repo_path: impl AsRef<Path>, _socket_path: &Path) -> std::i
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("contextd-{name}-{id}"));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
 
     fn temp_repo(name: &str) -> PathBuf {
         let id = SystemTime::now()
@@ -455,7 +543,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn installing_outside_a_repository_is_not_an_error() {
+    fn installing_outside_a_repository_explains_why() {
         let bare = std::env::temp_dir().join(format!(
             "contextd-not-a-repo-{}",
             SystemTime::now()
@@ -465,7 +553,49 @@ mod tests {
         ));
         std::fs::create_dir_all(&bare).unwrap();
 
-        assert!(install_hooks(&bare, &socket()).is_ok());
+        let err = install_hooks(&bare, &socket()).expect_err("a skip is not success");
+        assert!(
+            err.to_string().contains("no .git directory or file"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn installing_when_the_hooks_directory_is_missing_explains_why() {
+        let repo = temp_repo("missing-hooks");
+        std::fs::remove_dir_all(repo.join(".git/hooks")).unwrap();
+
+        let err = install_hooks(&repo, &socket()).expect_err("a skip is not success");
+        assert!(
+            err.to_string()
+                .contains("git hooks directory does not exist"),
+            "unhelpful error: {err}"
+        );
+        assert!(
+            err.to_string().contains(&repo.display().to_string()),
+            "error should name the repo that was looked up: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_worktree_gitfile_without_gitdir_explains_why() {
+        let root = std::env::temp_dir().join(format!(
+            "contextd-bad-gitfile-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".git"), "this is not a gitdir file\n").unwrap();
+
+        let err = install_hooks(&root, &socket()).expect_err("a skip is not success");
+        assert!(
+            err.to_string().contains("has no gitdir: line"),
+            "unhelpful error: {err}"
+        );
     }
 
     #[test]
@@ -490,5 +620,164 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         assert_eq!(find_git_root(&root), None);
+    }
+
+    #[test]
+    fn git_hooks_dir_for_a_plain_repo_is_dot_git_hooks() {
+        let repo = temp_repo("plain-hooks");
+        assert_eq!(git_hooks_dir(&repo).unwrap(), repo.join(".git/hooks"));
+    }
+
+    #[test]
+    fn git_hooks_dir_errors_for_an_empty_gitfile() {
+        let root = temp_dir("empty-gitfile");
+        std::fs::write(root.join(".git"), "gitdir:   \n").unwrap();
+        let err = git_hooks_dir(&root).expect_err("empty gitdir: is not a repo");
+        assert!(
+            err.to_string().contains("has no gitdir: line"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    fn linked_worktree(name: &str) -> (PathBuf, PathBuf) {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let main = std::env::temp_dir().join(format!("contextd-{name}-main-{id}"));
+        let worktree = std::env::temp_dir().join(format!("contextd-{name}-linked-{id}"));
+        std::fs::create_dir_all(main.join(".git/hooks")).unwrap();
+        std::fs::create_dir_all(main.join(".git/worktrees/observe")).unwrap();
+        std::fs::write(main.join(".git/worktrees/observe/commondir"), "../..\n").unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+        (main, worktree)
+    }
+
+    #[test]
+    fn git_hooks_dir_follows_a_worktree_git_file() {
+        let (main, worktree) = linked_worktree("wt-abs");
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}/.git/worktrees/observe\n", main.display()),
+        )
+        .unwrap();
+
+        let hooks = git_hooks_dir(&worktree)
+            .expect("worktree should resolve hooks")
+            .canonicalize()
+            .unwrap();
+        assert_eq!(hooks, main.join(".git/hooks").canonicalize().unwrap());
+        assert_eq!(git_hooks_dir(&main).unwrap(), main.join(".git/hooks"));
+    }
+
+    #[test]
+    fn git_hooks_dir_resolves_a_relative_gitdir_against_the_worktree() {
+        // Git writes `gitdir: ../main/.git/worktrees/<name>` for relative
+        // worktrees. Relative `gitdir:` is resolved against the gitfile's
+        // parent, not process CWD.
+        let (main, worktree) = linked_worktree("wt-rel");
+        let relative = format!(
+            "../{}/.git/worktrees/observe",
+            main.file_name().unwrap().to_string_lossy()
+        );
+        std::fs::write(worktree.join(".git"), format!("gitdir: {relative}\n")).unwrap();
+
+        let hooks = git_hooks_dir(&worktree)
+            .expect("relative gitdir should resolve")
+            .canonicalize()
+            .unwrap();
+        assert_eq!(hooks, main.join(".git/hooks").canonicalize().unwrap());
+    }
+
+    #[test]
+    fn git_hooks_dir_errors_when_a_relative_gitdir_cannot_be_found() {
+        let root = std::env::temp_dir().join(format!(
+            "contextd-missing-gitdir-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".git"),
+            "gitdir: ../does-not-exist/.git/worktrees/x\n",
+        )
+        .unwrap();
+
+        let err = git_hooks_dir(&root).expect_err("a miss is not success");
+        assert!(
+            err.to_string().contains("does not exist"),
+            "unhelpful error: {err}"
+        );
+        assert!(
+            err.to_string().contains("does-not-exist"),
+            "error should name the gitdir that was missing: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_hooks_follows_a_relative_gitdir_into_the_common_hooks_dir() {
+        let (main, worktree) = linked_worktree("wt-install");
+        let relative = format!(
+            "../{}/.git/worktrees/observe",
+            main.file_name().unwrap().to_string_lossy()
+        );
+        std::fs::write(worktree.join(".git"), format!("gitdir: {relative}\n")).unwrap();
+
+        install_hooks(&worktree, &socket()).expect("relative gitdir should install");
+
+        assert!(
+            main.join(".git/hooks/post-commit").exists(),
+            "hooks belong in the common directory, not the worktree"
+        );
+        assert!(
+            !worktree.join("hooks/post-commit").exists(),
+            "must not invent a hooks directory relative to cwd"
+        );
+    }
+
+    #[test]
+    fn git_hooks_dir_resolves_relative_gitdir_against_the_git_file() {
+        // Submodules always write `gitdir: ../.git/modules/<name>` (relative to
+        // the directory that contains the .git *file*, not to process CWD).
+        let super_repo = temp_dir("sub-super");
+        let child = super_repo.join("child");
+        let module_git = super_repo.join(".git/modules/child");
+        std::fs::create_dir_all(module_git.join("hooks")).unwrap();
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(child.join(".git"), "gitdir: ../.git/modules/child\n").unwrap();
+
+        let hooks = git_hooks_dir(&child)
+            .expect("relative gitdir: must resolve")
+            .canonicalize()
+            .unwrap();
+        assert_eq!(hooks, module_git.join("hooks").canonicalize().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_hooks_follows_a_relative_gitdir_pointer() {
+        let super_repo = temp_dir("install-sub");
+        let child = super_repo.join("child");
+        let module_hooks = super_repo.join(".git/modules/child/hooks");
+        std::fs::create_dir_all(&module_hooks).unwrap();
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(child.join(".git"), "gitdir: ../.git/modules/child\n").unwrap();
+
+        install_hooks(&child, &socket()).expect("install should succeed");
+
+        let hook = module_hooks.join("post-commit");
+        assert!(
+            hook.exists(),
+            "hooks must land in the module git dir, not be silently skipped"
+        );
+        assert!(
+            std::fs::read_to_string(&hook)
+                .unwrap()
+                .contains(CONTEXTD_HOOK_MARKER)
+        );
+        assert!(!child.join(".git/hooks/post-commit").exists());
     }
 }
