@@ -136,8 +136,10 @@ pub fn find_git_root(start: impl AsRef<Path>) -> Option<PathBuf> {
 /// The git directory for a `.git` path (directory or gitfile).
 ///
 /// Matches Git's `resolve_gitdir`: a directory is used as-is; a gitfile's
-/// `gitdir:` value is absolute as written, or resolved against the directory
-/// that contains the gitfile — never against process CWD.
+/// first line must be `gitdir: <path>`. That path is absolute as written, or
+/// resolved against the directory that contains the gitfile — never against
+/// process CWD. A later `gitdir:` line, or `gitdir:` without the space, is
+/// not a gitfile.
 fn resolve_git_dir(git: &Path) -> io::Result<PathBuf> {
     if git.is_dir() {
         return Ok(git.to_path_buf());
@@ -146,7 +148,8 @@ fn resolve_git_dir(git: &Path) -> io::Result<PathBuf> {
         let text = std::fs::read_to_string(git)?;
         let pointed = text
             .lines()
-            .find_map(|line| line.strip_prefix("gitdir:"))
+            .next()
+            .and_then(|line| line.strip_prefix("gitdir: "))
             .map(str::trim)
             .filter(|line| !line.is_empty())
             .ok_or_else(|| {
@@ -633,6 +636,44 @@ mod tests {
         let root = temp_dir("empty-gitfile");
         std::fs::write(root.join(".git"), "gitdir:   \n").unwrap();
         let err = git_hooks_dir(&root).expect_err("empty gitdir: is not a repo");
+        assert!(
+            err.to_string().contains("has no gitdir: line"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn git_hooks_dir_rejects_gitdir_without_the_required_space() {
+        // Git's read_gitfile_gently requires starts_with("gitdir: ").
+        // `gitdir:/path` is not a gitfile; treating it as one would install
+        // hooks wherever the concatenated path happens to point.
+        let (main, worktree) = linked_worktree("wt-nospace");
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir:{}/.git/worktrees/observe\n", main.display()),
+        )
+        .unwrap();
+
+        let err = git_hooks_dir(&worktree).expect_err("gitdir:/path is not a gitfile");
+        assert!(
+            err.to_string().contains("has no gitdir: line"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn git_hooks_dir_rejects_gitdir_on_a_later_line() {
+        let (main, worktree) = linked_worktree("wt-later");
+        std::fs::write(
+            worktree.join(".git"),
+            format!(
+                "not a gitfile\ngitdir: {}/.git/worktrees/observe\n",
+                main.display()
+            ),
+        )
+        .unwrap();
+
+        let err = git_hooks_dir(&worktree).expect_err("only the first line is a gitfile");
         assert!(
             err.to_string().contains("has no gitdir: line"),
             "unhelpful error: {err}"
