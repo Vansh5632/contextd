@@ -198,26 +198,115 @@ fn git_common_dir(git_dir: &Path) -> PathBuf {
     }
 }
 
+/// Local `core.hooksPath`, if set. Empty values are treated as unset.
+///
+/// Only `[core]` (no subsection) counts. Keys are matched case-insensitively.
+/// Quoted values are unquoted; an unquoted `#` or `;` starts an inline comment.
+fn core_hooks_path_from_config(text: &str) -> Option<String> {
+    let mut in_core = false;
+    let mut found: Option<String> = None;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(inner) = section_header(line) {
+            in_core = is_plain_core_section(inner);
+            continue;
+        }
+        if !in_core {
+            continue;
+        }
+        if let Some(value) = config_assignment(line, "hookspath") {
+            found = if value.is_empty() { None } else { Some(value) };
+        }
+    }
+    found
+}
+
+fn section_header(line: &str) -> Option<&str> {
+    line.strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .map(str::trim)
+}
+
+fn is_plain_core_section(inner: &str) -> bool {
+    !inner.contains('"') && inner.eq_ignore_ascii_case("core")
+}
+
+fn config_assignment(line: &str, key: &str) -> Option<String> {
+    let eq = line.find('=')?;
+    let name = line[..eq].trim();
+    if !name.eq_ignore_ascii_case(key) {
+        return None;
+    }
+    Some(parse_config_value(line[eq + 1..].trim_start()))
+}
+
+fn parse_config_value(rest: &str) -> String {
+    let rest = rest.trim_start();
+    if let Some(inner) = rest.strip_prefix('"') {
+        return inner
+            .split_once('"')
+            .map(|(value, _)| value.to_string())
+            .unwrap_or_else(|| inner.trim().to_string());
+    }
+    let comment = rest
+        .find('#')
+        .into_iter()
+        .chain(rest.find(';'))
+        .min()
+        .unwrap_or(rest.len());
+    rest[..comment].trim().to_string()
+}
+
+/// `core.hooksPath` from `$GIT_COMMON_DIR/config`, overridden by
+/// `$GIT_DIR/config.worktree` when that file sets the key.
+fn read_core_hooks_path(common_dir: &Path, git_dir: &Path) -> Option<String> {
+    let mut path = std::fs::read_to_string(common_dir.join("config"))
+        .ok()
+        .and_then(|text| core_hooks_path_from_config(&text));
+    if let Ok(text) = std::fs::read_to_string(git_dir.join("config.worktree"))
+        && let Some(overridden) = core_hooks_path_from_config(&text)
+    {
+        path = Some(overridden);
+    }
+    path
+}
+
 /// Where git actually keeps hooks for this working tree.
 ///
-/// A normal repo has `.git/hooks`. A linked worktree or submodule has a
-/// `.git` *file* pointing at the real git dir; worktree hooks live in the
-/// common directory, submodule hooks live in `.git/modules/<name>/hooks`.
+/// Honour `core.hooksPath` from local config when set: a relative value is
+/// joined to the working tree (the directory where Git runs hooks), never to
+/// `$GIT_DIR` or process CWD. Otherwise a normal repo has `.git/hooks`; a
+/// linked worktree or submodule follows `gitdir:` / `commondir` into the
+/// common or module hooks directory.
 pub fn git_hooks_dir(repo_path: impl AsRef<Path>) -> io::Result<PathBuf> {
-    let git_dir = resolve_git_dir(&repo_path.as_ref().join(".git"))?;
-    Ok(git_common_dir(&git_dir).join("hooks"))
+    let repo_path = repo_path.as_ref();
+    let git_dir = resolve_git_dir(&repo_path.join(".git"))?;
+    let common = git_common_dir(&git_dir);
+    if let Some(configured) = read_core_hooks_path(&common, &git_dir) {
+        let path = Path::new(&configured);
+        if path.is_absolute() {
+            Ok(path.to_path_buf())
+        } else {
+            Ok(repo_path.join(path))
+        }
+    } else {
+        Ok(common.join("hooks"))
+    }
 }
 
 /// Install every contextd hook into a repository.
 ///
 /// Safe to run repeatedly, and safe to run on a repository with its own hooks.
-/// Returns an error if the hooks directory cannot be resolved or does not
-/// exist: callers must not treat a skip as success.
+/// Returns an error if the hooks directory cannot be resolved or is not a
+/// directory: callers must not treat a skip as success.
 #[cfg(unix)]
 pub fn install_hooks(repo_path: impl AsRef<Path>, socket_path: &Path) -> io::Result<()> {
     let hooks_dir = git_hooks_dir(repo_path.as_ref())?;
 
-    if !hooks_dir.exists() {
+    if !hooks_dir.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!(
@@ -820,5 +909,201 @@ mod tests {
                 .contains(CONTEXTD_HOOK_MARKER)
         );
         assert!(!child.join(".git/hooks/post-commit").exists());
+    }
+
+    fn write_core_hooks_path(repo: &Path, value: &str) {
+        std::fs::write(
+            repo.join(".git/config"),
+            format!("[core]\n\thooksPath = {value}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn git_hooks_dir_follows_relative_core_hooks_path() {
+        let repo = temp_repo("husky-hooks");
+        std::fs::create_dir_all(repo.join(".husky/_")).unwrap();
+        write_core_hooks_path(&repo, ".husky/_");
+
+        assert_eq!(git_hooks_dir(&repo).unwrap(), repo.join(".husky/_"));
+    }
+
+    #[test]
+    fn git_hooks_dir_unquotes_core_hooks_path() {
+        let repo = temp_repo("quoted-hooks");
+        std::fs::create_dir_all(repo.join(".lefthook")).unwrap();
+        write_core_hooks_path(&repo, "\".lefthook\"");
+
+        assert_eq!(git_hooks_dir(&repo).unwrap(), repo.join(".lefthook"));
+    }
+
+    #[test]
+    fn git_hooks_dir_uses_absolute_core_hooks_path() {
+        let repo = temp_repo("abs-hooks");
+        let hooks = temp_dir("abs-hooks-dir");
+        write_core_hooks_path(&repo, &hooks.display().to_string());
+
+        assert_eq!(git_hooks_dir(&repo).unwrap(), hooks);
+    }
+
+    #[test]
+    fn git_hooks_dir_ignores_core_subsection_hooks_path() {
+        let repo = temp_repo("core-sub");
+        std::fs::create_dir_all(repo.join(".wrong")).unwrap();
+        std::fs::write(
+            repo.join(".git/config"),
+            "[core \"foo\"]\n\thooksPath = .wrong\n[user]\n\tname = x\n",
+        )
+        .unwrap();
+
+        assert_eq!(git_hooks_dir(&repo).unwrap(), repo.join(".git/hooks"));
+    }
+
+    #[test]
+    fn git_hooks_dir_last_hooks_path_wins() {
+        let repo = temp_repo("dup-hooks");
+        std::fs::create_dir_all(repo.join(".first")).unwrap();
+        std::fs::create_dir_all(repo.join(".second")).unwrap();
+        std::fs::write(
+            repo.join(".git/config"),
+            "[core]\n\thooksPath = .first\n\thooksPath = .second\n",
+        )
+        .unwrap();
+
+        assert_eq!(git_hooks_dir(&repo).unwrap(), repo.join(".second"));
+    }
+
+    #[test]
+    fn git_hooks_dir_empty_hooks_path_falls_back_to_dot_git_hooks() {
+        let repo = temp_repo("empty-hooks-path");
+        write_core_hooks_path(&repo, "");
+
+        assert_eq!(git_hooks_dir(&repo).unwrap(), repo.join(".git/hooks"));
+    }
+
+    #[test]
+    fn git_hooks_dir_hooks_path_key_is_case_insensitive() {
+        let repo = temp_repo("case-hooks");
+        std::fs::create_dir_all(repo.join(".husky/_")).unwrap();
+        std::fs::write(repo.join(".git/config"), "[core]\n\thookspath = .husky/_\n").unwrap();
+
+        assert_eq!(git_hooks_dir(&repo).unwrap(), repo.join(".husky/_"));
+    }
+
+    #[test]
+    fn git_hooks_dir_strips_inline_comment_from_hooks_path() {
+        let repo = temp_repo("comment-hooks");
+        std::fs::create_dir_all(repo.join(".husky/_")).unwrap();
+        std::fs::write(
+            repo.join(".git/config"),
+            "[core]\n\thooksPath = .husky/_ # managed by husky\n",
+        )
+        .unwrap();
+
+        assert_eq!(git_hooks_dir(&repo).unwrap(), repo.join(".husky/_"));
+    }
+
+    #[test]
+    fn git_hooks_dir_resolves_relative_hooks_path_against_this_worktree() {
+        let (main, worktree) = linked_worktree("wt-hooks-path");
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}/.git/worktrees/observe\n", main.display()),
+        )
+        .unwrap();
+        std::fs::write(main.join(".git/config"), "[core]\n\thooksPath = .husky/_\n").unwrap();
+        std::fs::create_dir_all(worktree.join(".husky/_")).unwrap();
+        std::fs::create_dir_all(main.join(".husky/_")).unwrap();
+
+        assert_eq!(git_hooks_dir(&worktree).unwrap(), worktree.join(".husky/_"));
+        assert_eq!(git_hooks_dir(&main).unwrap(), main.join(".husky/_"));
+    }
+
+    #[test]
+    fn git_hooks_dir_prefers_worktree_config_hooks_path() {
+        let (main, worktree) = linked_worktree("wt-config");
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}/.git/worktrees/observe\n", main.display()),
+        )
+        .unwrap();
+        std::fs::write(main.join(".git/config"), "[core]\n\thooksPath = .husky/_\n").unwrap();
+        std::fs::write(
+            main.join(".git/worktrees/observe/config.worktree"),
+            "[core]\n\thooksPath = .lefthook\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(worktree.join(".lefthook")).unwrap();
+        std::fs::create_dir_all(worktree.join(".husky/_")).unwrap();
+
+        assert_eq!(
+            git_hooks_dir(&worktree).unwrap(),
+            worktree.join(".lefthook")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_hooks_writes_into_core_hooks_path_and_preserves_the_existing_hook() {
+        let repo = temp_repo("install-husky");
+        let hooks_dir = repo.join(".husky/_");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+        std::fs::write(hooks_dir.join("post-commit"), "#!/bin/sh\necho husky\n").unwrap();
+        write_core_hooks_path(&repo, ".husky/_");
+
+        install_hooks(&repo, &socket()).expect("hook install should succeed");
+
+        let hook = std::fs::read_to_string(hooks_dir.join("post-commit")).unwrap();
+        assert!(hook.contains(CONTEXTD_HOOK_MARKER));
+        assert!(
+            hook.contains("post-commit.contextd-backup"),
+            "the preserved hook must still be called"
+        );
+        assert_eq!(
+            std::fs::read_to_string(hooks_dir.join("post-commit.contextd-backup")).unwrap(),
+            "#!/bin/sh\necho husky\n"
+        );
+        assert!(
+            !repo.join(".git/hooks/post-commit").exists(),
+            "Git never runs .git/hooks when core.hooksPath is set"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_hooks_errors_when_core_hooks_path_is_missing_and_does_not_fall_back() {
+        let repo = temp_repo("missing-hooks-path");
+        write_core_hooks_path(&repo, ".husky/_");
+
+        let err = install_hooks(&repo, &socket()).expect_err("a skip is not success");
+        assert!(
+            err.to_string()
+                .contains("git hooks directory does not exist"),
+            "unhelpful error: {err}"
+        );
+        assert!(
+            err.to_string().contains(".husky/_"),
+            "error should name the configured hooks path: {err}"
+        );
+        assert!(
+            !repo.join(".git/hooks/post-commit").exists(),
+            "must not fall back to .git/hooks"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_hooks_errors_when_core_hooks_path_is_not_a_directory() {
+        let repo = temp_repo("hooks-path-file");
+        std::fs::write(repo.join(".not-a-dir"), "").unwrap();
+        write_core_hooks_path(&repo, ".not-a-dir");
+
+        let err = install_hooks(&repo, &socket()).expect_err("a file is not a hooks directory");
+        assert!(
+            err.to_string()
+                .contains("git hooks directory does not exist"),
+            "unhelpful error: {err}"
+        );
+        assert!(!repo.join(".git/hooks/post-commit").exists());
     }
 }
