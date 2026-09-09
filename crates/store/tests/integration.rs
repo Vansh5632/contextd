@@ -342,8 +342,13 @@ fn the_hot_queries_all_use_an_index() {
             "idx_events_session",
         ),
         (
-            "enrichment backlog",
-            "SELECT id FROM events WHERE enriched_at_ms IS NULL ORDER BY timestamp_ms ASC LIMIT 64",
+            "analysis backlog",
+            "SELECT id FROM events WHERE enriched_at_ms IS NULL AND use_case IS NULL ORDER BY timestamp_ms ASC LIMIT 64",
+            "idx_events_analysis_backlog",
+        ),
+        (
+            "embedding backlog",
+            "SELECT id FROM events WHERE enriched_at_ms IS NULL AND use_case IS NOT NULL ORDER BY timestamp_ms ASC LIMIT 64",
             "idx_events_backlog",
         ),
     ];
@@ -429,13 +434,19 @@ fn migration_adds_the_enrichment_columns_to_an_old_table() {
 
 #[test]
 fn enrichment_round_trips_through_the_row() {
-    use store::db::{Enrichment, get_enrichment_backlog, mark_enriched, record_analysis};
+    use store::db::{
+        Enrichment, get_analysis_backlog, get_embedding_backlog, mark_enriched, record_analysis,
+    };
 
     let cfg = test_config_in_memory();
     let conn = init_db(&cfg).expect("db should initialize");
     insert_event(&conn, &processed("evt", 1_000, 0.7)).unwrap();
 
-    assert_eq!(get_enrichment_backlog(&conn, 10).unwrap().len(), 1);
+    assert_eq!(get_analysis_backlog(&conn, 10).unwrap().len(), 1);
+    assert!(
+        get_embedding_backlog(&conn, 10).unwrap().is_empty(),
+        "a fresh row still needs analysis, not a vector"
+    );
 
     record_analysis(
         &conn,
@@ -453,17 +464,57 @@ fn enrichment_round_trips_through_the_row() {
     assert_eq!(event.memory_type.as_deref(), Some("episodic"));
     assert_eq!(event.summary.as_deref(), Some("ran the test suite"));
 
+    assert!(
+        get_analysis_backlog(&conn, 10).unwrap().is_empty(),
+        "analysis moves the row off the analysis backlog"
+    );
     assert_eq!(
-        get_enrichment_backlog(&conn, 10).unwrap().len(),
+        get_embedding_backlog(&conn, 10).unwrap().len(),
         1,
         "analysis alone does not finish an event; it still needs a vector"
     );
 
     mark_enriched(&conn, "evt", 9_999).unwrap();
     assert!(
-        get_enrichment_backlog(&conn, 10).unwrap().is_empty(),
-        "an enriched row must leave the backlog"
+        get_embedding_backlog(&conn, 10).unwrap().is_empty(),
+        "an enriched row must leave the embedding backlog"
     );
+}
+
+#[test]
+fn analysis_backlog_advances_past_already_analyzed_rows() {
+    use store::db::{Enrichment, get_analysis_backlog, get_embedding_backlog, record_analysis};
+
+    let cfg = test_config_in_memory();
+    let conn = init_db(&cfg).expect("db should initialize");
+
+    for i in 0..70 {
+        insert_event(&conn, &processed(&format!("evt-{i:02}"), 1_000 + i, 0.7)).unwrap();
+    }
+
+    let first = get_analysis_backlog(&conn, 64).unwrap();
+    let first_ids: Vec<String> = first.iter().map(|e| e.raw.id.clone()).collect();
+    assert_eq!(first_ids.len(), 64);
+    assert_eq!(first_ids.first().map(String::as_str), Some("evt-00"));
+    assert_eq!(first_ids.last().map(String::as_str), Some("evt-63"));
+
+    let sample = Enrichment {
+        use_case: Some("coding".to_string()),
+        memory_type: Some("episodic".to_string()),
+        summary: Some("classified".to_string()),
+    };
+    for id in &first_ids {
+        record_analysis(&conn, id, &sample).unwrap();
+    }
+
+    let second = get_analysis_backlog(&conn, 64).unwrap();
+    let second_ids: Vec<&str> = second.iter().map(|e| e.raw.id.as_str()).collect();
+    assert_eq!(
+        second_ids,
+        vec!["evt-64", "evt-65", "evt-66", "evt-67", "evt-68", "evt-69"],
+        "analyzing the oldest 64 must uncover the remaining rows, not re-select them"
+    );
+    assert_eq!(get_embedding_backlog(&conn, 100).unwrap().len(), 64);
 }
 
 #[test]
