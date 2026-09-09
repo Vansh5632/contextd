@@ -1,6 +1,7 @@
 use crate::noise::NoiseFilter;
 use anyhow::{Context, Result};
 use contextd_core::event::{EventSource, RawEvent};
+use notify::event::{ModifyKind, RenameMode};
 use notify::{Config, Event, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::json;
 use std::fs;
@@ -38,7 +39,7 @@ pub async fn start_filesystem_watcher(
     while let Some(result) = event_rx.recv().await {
         match result {
             Ok(event) => {
-                watch_created_directories(&mut *watcher, &event, &filter);
+                watch_new_directories(&mut *watcher, &event, &filter);
                 publish_event(event, &tx, &filter);
             }
             Err(err) => warn!("filesystem watcher error: {err}"),
@@ -183,7 +184,7 @@ fn collect_interesting_dirs(dir: &Path, filter: &NoiseFilter, out: &mut Vec<Path
             continue;
         }
         let path = entry.path();
-        if filter.is_interesting(&path) {
+        if filter.is_interesting_directory(&path) {
             collect_interesting_dirs(&path, filter, out);
         }
     }
@@ -196,19 +197,38 @@ fn attach_watches(watcher: &mut dyn Watcher, dirs: &[PathBuf]) -> notify::Result
     Ok(())
 }
 
-fn watch_created_directories(watcher: &mut dyn Watcher, event: &Event, filter: &NoiseFilter) {
-    if !matches!(event.kind, EventKind::Create(_)) {
+fn watch_new_directories(watcher: &mut dyn Watcher, event: &Event, filter: &NoiseFilter) {
+    if !introduces_directory(event.kind) {
         return;
     }
     for path in &event.paths {
-        if !filter.is_interesting(path) || !path.is_dir() {
-            continue;
-        }
-        if let Err(err) = watcher.watch(path, RecursiveMode::NonRecursive) {
+        watch_interesting_tree(watcher, path, filter);
+    }
+}
+
+/// Create and rename-to both introduce a directory that may not already have
+/// a watch. Inotify reports an in-tree move as `MOVED_TO` (`RenameMode::To` /
+/// `Both`), not `Create`, so the destination would otherwise stay unwatched.
+fn introduces_directory(kind: EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Create(_)
+            | EventKind::Modify(ModifyKind::Name(
+                RenameMode::To | RenameMode::Both | RenameMode::Any
+            ))
+    )
+}
+
+fn watch_interesting_tree(watcher: &mut dyn Watcher, path: &Path, filter: &NoiseFilter) {
+    if !filter.is_interesting_directory(path) || !path.is_dir() {
+        return;
+    }
+    for dir in interesting_watch_dirs(path, filter) {
+        if let Err(err) = watcher.watch(&dir, RecursiveMode::NonRecursive) {
             warn!(
-                path = %path.display(),
+                path = %dir.display(),
                 error = %err,
-                "failed to watch newly created directory"
+                "failed to watch newly appeared directory"
             );
         }
     }
@@ -224,7 +244,7 @@ fn is_interesting_kind(kind: &EventKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notify::event::{DataChange, ModifyKind};
+    use notify::event::{DataChange, ModifyKind, RenameMode};
     use std::path::Path;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -421,7 +441,7 @@ mod tests {
         let mut watcher = RecordingWatcher {
             watched: Arc::clone(&recorded),
         };
-        watch_created_directories(&mut watcher, &create_folder(&nested), &NoiseFilter::new());
+        watch_new_directories(&mut watcher, &create_folder(&nested), &NoiseFilter::new());
 
         let watched = recorded.lock().unwrap().clone();
         let _ = std::fs::remove_dir_all(&root);
@@ -439,7 +459,7 @@ mod tests {
         let mut watcher = RecordingWatcher {
             watched: Arc::clone(&recorded),
         };
-        watch_created_directories(&mut watcher, &create_folder(&target), &NoiseFilter::new());
+        watch_new_directories(&mut watcher, &create_folder(&target), &NoiseFilter::new());
 
         let watched = recorded.lock().unwrap().clone();
         let _ = std::fs::remove_dir_all(&root);
@@ -447,6 +467,129 @@ mod tests {
         assert!(
             watched.is_empty(),
             "creating target/ must not register a new watch"
+        );
+    }
+
+    #[test]
+    fn directories_named_like_noisy_files_are_still_watched() {
+        let root = scratch_dir();
+        std::fs::create_dir_all(root.join("scratch.tmp/src")).unwrap();
+        std::fs::create_dir_all(root.join("backup~/nested")).unwrap();
+        std::fs::create_dir_all(root.join("target/debug")).unwrap();
+
+        let dirs = interesting_watch_dirs(&root, &NoiseFilter::new());
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(
+            dirs.contains(&root.join("scratch.tmp")),
+            "a source directory named scratch.tmp must still be watched"
+        );
+        assert!(
+            dirs.contains(&root.join("scratch.tmp/src")),
+            "contents of scratch.tmp must still be watched"
+        );
+        assert!(dirs.contains(&root.join("backup~")));
+        assert!(dirs.contains(&root.join("backup~/nested")));
+        assert!(
+            dirs.iter().all(|dir| !dir
+                .components()
+                .any(|component| component.as_os_str() == "target")),
+            "target/ must still be pruned"
+        );
+    }
+
+    #[test]
+    fn renamed_source_directories_get_watches_for_the_pruned_subtree() {
+        let root = scratch_dir();
+        let dest = root.join("src/moved");
+        std::fs::create_dir_all(dest.join("nested")).unwrap();
+        std::fs::create_dir_all(dest.join("target/debug")).unwrap();
+
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let mut watcher = RecordingWatcher {
+            watched: Arc::clone(&recorded),
+        };
+        watch_new_directories(&mut watcher, &rename_to(&dest), &NoiseFilter::new());
+
+        let watched = recorded.lock().unwrap().clone();
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(
+            watched
+                .iter()
+                .any(|(path, mode)| path == &dest && *mode == RecursiveMode::NonRecursive)
+        );
+        assert!(watched.iter().any(|(path, _)| path == &dest.join("nested")));
+        assert!(
+            watched.iter().all(|(path, _)| !path
+                .components()
+                .any(|component| component.as_os_str() == "target")),
+            "noise under the renamed tree must not be watched"
+        );
+    }
+
+    #[test]
+    fn rename_both_watches_the_destination_not_the_source() {
+        let root = scratch_dir();
+        let from = root.join("src/old");
+        let to = root.join("src/new");
+        std::fs::create_dir_all(&to).unwrap();
+
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let mut watcher = RecordingWatcher {
+            watched: Arc::clone(&recorded),
+        };
+        watch_new_directories(&mut watcher, &rename_both(&from, &to), &NoiseFilter::new());
+
+        let watched = recorded.lock().unwrap().clone();
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(watched, vec![(to, RecursiveMode::NonRecursive)]);
+        assert!(
+            watched.iter().all(|(path, _)| path != &from),
+            "the old location is gone and must not be watched"
+        );
+    }
+
+    #[test]
+    fn renamed_noise_directories_do_not_get_a_watch() {
+        let root = scratch_dir();
+        let dest = root.join("target/relocated");
+        std::fs::create_dir_all(&dest).unwrap();
+
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let mut watcher = RecordingWatcher {
+            watched: Arc::clone(&recorded),
+        };
+        watch_new_directories(&mut watcher, &rename_to(&dest), &NoiseFilter::new());
+
+        let watched = recorded.lock().unwrap().clone();
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(
+            watched.is_empty(),
+            "renaming into target/ must not register a new watch"
+        );
+    }
+
+    #[test]
+    fn rename_from_does_not_register_a_watch() {
+        let root = scratch_dir();
+        let from = root.join("src/old");
+        std::fs::create_dir_all(&from).unwrap();
+
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let mut watcher = RecordingWatcher {
+            watched: Arc::clone(&recorded),
+        };
+        watch_new_directories(&mut watcher, &rename_from(&from), &NoiseFilter::new());
+
+        let watched = recorded.lock().unwrap().clone();
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(
+            watched.is_empty(),
+            "MOVED_FROM is the old path; only the destination needs a watch"
         );
     }
 
@@ -466,6 +609,30 @@ mod tests {
         Event {
             kind: EventKind::Create(notify::event::CreateKind::Folder),
             paths: vec![path.to_path_buf()],
+            attrs: Default::default(),
+        }
+    }
+
+    fn rename_to(path: &Path) -> Event {
+        Event {
+            kind: EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+            paths: vec![path.to_path_buf()],
+            attrs: Default::default(),
+        }
+    }
+
+    fn rename_from(path: &Path) -> Event {
+        Event {
+            kind: EventKind::Modify(ModifyKind::Name(RenameMode::From)),
+            paths: vec![path.to_path_buf()],
+            attrs: Default::default(),
+        }
+    }
+
+    fn rename_both(from: &Path, to: &Path) -> Event {
+        Event {
+            kind: EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            paths: vec![from.to_path_buf(), to.to_path_buf()],
             attrs: Default::default(),
         }
     }
