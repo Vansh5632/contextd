@@ -107,16 +107,18 @@ impl NoiseFilter {
         !self.is_noise(path)
     }
 
-    fn is_noise(&self, path: &Path) -> bool {
-        if self.is_our_own(path) {
-            return true;
-        }
+    /// True when this directory should receive a kernel watch or poll scan.
+    ///
+    /// File-event noise (`.tmp`, `.o`, `~`, editor scratch names) does not
+    /// apply: a source tree named `scratch.tmp` is still a real tree. Only
+    /// ignored directory components (`target/`, `node_modules/`, `.git/`) and
+    /// paths contextd owns are excluded.
+    pub fn is_interesting_directory(&self, path: &Path) -> bool {
+        !self.is_ignored_directory(path)
+    }
 
-        if path
-            .components()
-            .filter_map(|component| component.as_os_str().to_str())
-            .any(|component| self.ignored_directories.contains(component))
-        {
+    fn is_noise(&self, path: &Path) -> bool {
+        if self.is_ignored_directory(path) {
             return true;
         }
 
@@ -125,6 +127,16 @@ impl NoiseFilter {
         };
 
         is_noisy_filename(name)
+    }
+
+    fn is_ignored_directory(&self, path: &Path) -> bool {
+        if self.is_our_own(path) {
+            return true;
+        }
+
+        path.components()
+            .filter_map(|component| component.as_os_str().to_str())
+            .any(|component| self.ignored_directories.contains(component))
     }
 
     /// Anything at or beneath a path contextd owns.
@@ -269,5 +281,35 @@ mod tests {
     #[test]
     fn a_path_with_no_filename_does_not_panic() {
         assert!(NoiseFilter::new().is_interesting(Path::new("/")));
+    }
+
+    #[test]
+    fn directories_named_like_noisy_files_are_still_watchable() {
+        let filter = NoiseFilter::new();
+        for path in [
+            "/repo/scratch.tmp",
+            "/repo/cache.o",
+            "/repo/backup~",
+            "/repo/notes.bak",
+        ] {
+            assert!(
+                filter.is_interesting_directory(Path::new(path)),
+                "{path} is a directory name, not a file to skip"
+            );
+        }
+        assert!(
+            !filter.is_interesting(Path::new("/repo/scratch.tmp")),
+            "a file with a noisy name is still not an event"
+        );
+    }
+
+    #[test]
+    fn watchable_directories_still_exclude_build_trees_and_owned_paths() {
+        let filter = NoiseFilter::new().ignoring("/repo/generated");
+        assert!(!filter.is_interesting_directory(Path::new("/repo/target")));
+        assert!(!filter.is_interesting_directory(Path::new("/repo/node_modules/pkg")));
+        assert!(!filter.is_interesting_directory(Path::new("/repo/.git")));
+        assert!(!filter.is_interesting_directory(Path::new("/repo/generated")));
+        assert!(filter.is_interesting_directory(Path::new("/repo/src")));
     }
 }
