@@ -188,7 +188,10 @@ pub fn run_install(config: &AppConfig) -> anyhow::Result<()> {
 
     match sources::git::find_git_root(std::env::current_dir()?) {
         Some(repo) => match sources::git::install_hooks(&repo, &config.socket_path) {
-            Ok(()) => println!("git        hooks installed in {}", repo.display()),
+            Ok(()) => {
+                let dest = sources::git::git_hooks_dir(&repo).unwrap_or(repo);
+                println!("git        hooks installed in {}", dest.display());
+            }
             Err(err) => println!("git        could not install hooks: {err}"),
         },
         None => println!("git        not in a repository, skipped"),
