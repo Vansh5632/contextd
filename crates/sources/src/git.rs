@@ -45,8 +45,8 @@ const HOOKS: &[HookSpec] = &[
         body: r#"
 HASH=$(git rev-parse HEAD 2>/dev/null || echo unknown)
 MESSAGE=$(git log -1 --pretty=%B 2>/dev/null | head -n 1 | tr -d '\r\n')
-PAYLOAD=$(printf '{"timestamp_ms":%s,"source":"git","payload":{"action":"commit","hash":"%s","message":"%s"}}' \
-  "$TIMESTAMP" "$HASH" "$(json_escape "$MESSAGE")")
+PAYLOAD=$(printf '{"timestamp_ms":%s,"source":"git","payload":{"action":"commit","hash":"%s","message":"%s","repo":"%s"}}' \
+  "$TIMESTAMP" "$HASH" "$(json_escape "$MESSAGE")" "$(json_escape "$REPO")")
 "#,
     },
     HookSpec {
@@ -59,16 +59,16 @@ if [ "$3" != "1" ]; then
 fi
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
-PAYLOAD=$(printf '{"timestamp_ms":%s,"source":"git","payload":{"action":"checkout","message":"%s","from":"%s","to":"%s"}}' \
-  "$TIMESTAMP" "$(json_escape "$BRANCH")" "$1" "$2")
+PAYLOAD=$(printf '{"timestamp_ms":%s,"source":"git","payload":{"action":"checkout","message":"%s","from":"%s","to":"%s","repo":"%s"}}' \
+  "$TIMESTAMP" "$(json_escape "$BRANCH")" "$1" "$2" "$(json_escape "$REPO")")
 "#,
     },
     HookSpec {
         name: "pre-push",
         body: r#"
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
-PAYLOAD=$(printf '{"timestamp_ms":%s,"source":"git","payload":{"action":"push","remote":"%s","message":"%s"}}' \
-  "$TIMESTAMP" "$(json_escape "${1:-origin}")" "$(json_escape "$BRANCH")")
+PAYLOAD=$(printf '{"timestamp_ms":%s,"source":"git","payload":{"action":"push","remote":"%s","message":"%s","repo":"%s"}}' \
+  "$TIMESTAMP" "$(json_escape "${1:-origin}")" "$(json_escape "$BRANCH")" "$(json_escape "$REPO")")
 "#,
     },
 ];
@@ -104,6 +104,7 @@ json_escape() {{
 }}
 
 TIMESTAMP=$(date +%s000)
+REPO=$(git rev-parse --show-toplevel 2>/dev/null || true)
 PAYLOAD=
 {body}
 [ -n "$PAYLOAD" ] || exit 0
@@ -444,6 +445,32 @@ mod tests {
             hook.contains("CONTEXTD_SOCKET"),
             "the environment must still be able to override it"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn every_git_hook_payload_includes_the_working_tree() {
+        // entities_of(Git) only creates a Repo node from payload.repo.
+        // If the hook never sends that key, commits/checkouts/pushes
+        // are invisible to the graph.
+        let repo = temp_repo("repo-in-payload");
+        install_hooks(&repo, &socket()).unwrap();
+
+        for name in ["post-commit", "post-checkout", "pre-push"] {
+            let hook = read_hook(&repo, name);
+            assert!(
+                hook.contains("git rev-parse --show-toplevel"),
+                "{name} must resolve the working tree, not $PWD"
+            );
+            assert!(
+                hook.contains(r#""repo":"%s""#),
+                "{name} must include payload.repo in the JSON"
+            );
+            assert!(
+                hook.contains(r#"$(json_escape "$REPO")"#),
+                "{name} must escape the path; a quote in it must not break JSON"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -1105,5 +1132,33 @@ mod tests {
             "unhelpful error: {err}"
         );
         assert!(!repo.join(".git/hooks/post-commit").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_toplevel_does_not_send_unknown_as_the_repo() {
+        let repo = temp_repo("no-unknown-repo");
+        install_hooks(&repo, &socket()).unwrap();
+        let hook = read_hook(&repo, "post-commit");
+        assert!(
+            !hook.contains(r#"REPO=$(git rev-parse --show-toplevel 2>/dev/null || echo unknown)"#),
+            "unknown would become a shared junk Repo node"
+        );
+        // HASH may still use `|| echo unknown`; that field is not an entity.
+        assert!(hook.contains(r#"REPO=$(git rev-parse --show-toplevel 2>/dev/null || true)"#));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn post_checkout_still_ignores_file_checkouts() {
+        let repo = temp_repo("file-checkout");
+        install_hooks(&repo, &socket()).unwrap();
+        let hook = read_hook(&repo, "post-checkout");
+        assert!(hook.contains(r#"if [ "$3" != "1" ]; then"#));
+        assert!(
+            hook.find(r#"if [ "$3" != "1" ]; then"#).unwrap()
+                < hook.find("PAYLOAD=$(printf").unwrap(),
+            "a file checkout must not emit an event"
+        );
     }
 }
