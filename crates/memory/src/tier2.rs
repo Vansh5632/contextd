@@ -5,6 +5,7 @@
 //! ingest loop and the query handler, and a periodic flush to disk so a crash
 //! costs minutes of learning rather than months.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -76,19 +77,12 @@ impl SharedGraph {
     pub async fn related_to_event(&self, event: &ProcessedEvent, limit: usize) -> Vec<Related> {
         let graph = self.inner.read().await;
 
-        let mut all: Vec<Related> = crate::graph::entities_of(event)
+        let all: Vec<Related> = crate::graph::entities_of(event)
             .iter()
             .flat_map(|entity| graph.neighbours(entity, limit))
             .collect();
 
-        all.sort_by(|a, b| {
-            b.weight
-                .partial_cmp(&a.weight)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        all.dedup_by(|a, b| a.entity == b.entity);
-        all.truncate(limit);
-        all
+        collapse_related(all, limit)
     }
 
     pub async fn size(&self) -> (usize, usize) {
@@ -118,6 +112,27 @@ impl SharedGraph {
             Err(err) => warn!(error = ?err, "failed to flush the knowledge graph"),
         }
     }
+}
+
+fn collapse_related(all: Vec<Related>, limit: usize) -> Vec<Related> {
+    let mut best: HashMap<Entity, f32> = HashMap::new();
+    for related in all {
+        best.entry(related.entity)
+            .and_modify(|weight| *weight = weight.max(related.weight))
+            .or_insert(related.weight);
+    }
+    let mut collapsed: Vec<Related> = best
+        .into_iter()
+        .map(|(entity, weight)| Related { entity, weight })
+        .collect();
+    collapsed.sort_by(|a, b| {
+        b.weight
+            .partial_cmp(&a.weight)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.entity.key().cmp(&b.entity.key()))
+    });
+    collapsed.truncate(limit);
+    collapsed
 }
 
 /// Mirror the graph to disk on a timer, forever.
@@ -258,5 +273,88 @@ mod tests {
         let conn = store.reader().unwrap();
 
         assert_eq!(SharedGraph::load(&conn).size().await, (0, 0));
+    }
+
+    fn related(kind: EntityKind, name: &str, weight: f32) -> Related {
+        Related {
+            entity: Entity::new(kind, name),
+            weight,
+        }
+    }
+
+    #[test]
+    fn collapse_related_keeps_the_strongest_copy_of_each_entity() {
+        let collapsed = collapse_related(
+            vec![
+                related(EntityKind::Command, "cargo test", 5.0),
+                related(EntityKind::Command, "cargo fmt", 3.0),
+                related(EntityKind::Command, "cargo test", 1.0),
+            ],
+            5,
+        );
+
+        assert_eq!(
+            collapsed,
+            vec![
+                related(EntityKind::Command, "cargo test", 5.0),
+                related(EntityKind::Command, "cargo fmt", 3.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn collapse_related_collapses_equal_weight_duplicates() {
+        let collapsed = collapse_related(
+            vec![
+                related(EntityKind::Command, "cargo test", 2.0),
+                related(EntityKind::Command, "cargo test", 2.0),
+            ],
+            5,
+        );
+
+        assert_eq!(
+            collapsed,
+            vec![related(EntityKind::Command, "cargo test", 2.0)]
+        );
+    }
+
+    #[test]
+    fn collapse_related_truncates_to_the_strongest() {
+        let collapsed = collapse_related(
+            vec![
+                related(EntityKind::Command, "cargo test", 5.0),
+                related(EntityKind::Command, "cargo fmt", 3.0),
+                related(EntityKind::Command, "cargo clippy", 1.0),
+            ],
+            2,
+        );
+
+        assert_eq!(collapsed.len(), 2);
+        assert_eq!(collapsed[0].entity.name, "cargo test");
+        assert_eq!(collapsed[1].entity.name, "cargo fmt");
+    }
+
+    #[test]
+    fn collapse_related_breaks_equal_weight_ties_by_entity_identity() {
+        // Same name, different kinds, same weight: sorting by name alone is a
+        // no-op, so HashMap iteration would pick a different survivor each run
+        // when `limit` cuts through the tie.
+        let input = vec![
+            related(EntityKind::File, "build", 1.0),
+            related(EntityKind::Command, "build", 1.0),
+        ];
+        let first = collapse_related(input.clone(), 1);
+        for _ in 0..32 {
+            assert_eq!(
+                collapse_related(input.clone(), 1),
+                first,
+                "truncation among equal-weight identities must be stable"
+            );
+        }
+        assert_eq!(
+            first,
+            vec![related(EntityKind::Command, "build", 1.0)],
+            "the survivor must be the identity whose key sorts first"
+        );
     }
 }
