@@ -180,7 +180,8 @@ pub fn run_install(config: &AppConfig) -> anyhow::Result<()> {
     }
 
     let unit_path = install::systemd_unit_path();
-    match install::install_systemd_unit(&unit_path, &executable) {
+    let working_directory = watch_root(config)?;
+    match install::install_systemd_unit(&unit_path, &executable, &working_directory) {
         Ok(Outcome::AlreadyCurrent) => println!("systemd    already set up"),
         Ok(_) => println!("systemd    unit written to {}", unit_path.display()),
         Err(err) => println!("systemd    could not write the unit: {err}"),
