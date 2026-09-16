@@ -32,6 +32,7 @@ pub fn shell_snippet(socket_path: &Path) -> String {
     let socket = crate::emit::socket_default(socket_path);
     let emit = crate::emit::emit_function();
     let emit_fn = crate::emit::EMIT_FN;
+    let escape = crate::emit::json_escape_function();
 
     format!(
         r#"{BEGIN_MARKER}
@@ -41,12 +42,16 @@ export {socket}
 
 {emit}
 
+{escape}
+
 __contextd_send() {{
-  __contextd_cmd=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\r\n')
+  [ -n "$1" ] || return 0
+  __contextd_cmd=$(json_escape "$1")
   [ -n "$__contextd_cmd" ] || return 0
 
+  __contextd_cwd=$(json_escape "$PWD")
   {emit_fn} "$(printf '{{"source":"shell","payload":{{"command":"%s","exit_code":%s,"cwd":"%s"}}}}' \
-    "$__contextd_cmd" "${{2:-0}}" "$PWD")"
+    "$__contextd_cmd" "${{2:-0}}" "$__contextd_cwd")"
   return 0
 }}
 
@@ -247,6 +252,29 @@ mod tests {
             "the send must background"
         );
         assert!(snippet.contains(r#"[ -S "$CONTEXTD_SOCKET" ] || return 0"#));
+    }
+
+    #[test]
+    fn the_snippet_json_escapes_command_and_cwd() {
+        let snippet = shell_snippet(&socket());
+        assert!(
+            snippet.contains(r#"__contextd_cwd=$(json_escape "$PWD")"#),
+            "a quote in the working directory must not break the JSON line"
+        );
+        assert!(
+            snippet.contains(r#"__contextd_cmd=$(json_escape "$1")"#),
+            "the command must go through the same escape as git hooks"
+        );
+        assert!(
+            snippet.contains(r#""$__contextd_cwd""#),
+            "the JSON printf must use the escaped cwd, not raw $PWD"
+        );
+        assert!(
+            !snippet.contains(r#"sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\r\n'"#),
+            "the quote-only sed must not remain in the snippet"
+        );
+        assert!(snippet.contains(r#"printf '%s\n' "$1""#));
+        assert!(snippet.contains(r#"\u00%02x"#));
     }
 
     #[test]
