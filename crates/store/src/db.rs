@@ -175,6 +175,16 @@ pub fn record_analysis(conn: &Connection, event_id: &str, enrichment: &Enrichmen
     Ok(())
 }
 
+/// Replace the stored JSON for one event. Used when a long payload is summarised.
+pub fn replace_payload(conn: &Connection, event_id: &str, payload: &Value) -> Result<()> {
+    let payload_str = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
+    conn.execute(
+        "UPDATE events SET payload = ?2 WHERE id = ?1",
+        rusqlite::params![event_id, payload_str],
+    )?;
+    Ok(())
+}
+
 /// Declare an event fully processed, removing it from the embedding backlog.
 pub fn mark_enriched(conn: &Connection, event_id: &str, enriched_at_ms: u64) -> Result<()> {
     conn.execute(
