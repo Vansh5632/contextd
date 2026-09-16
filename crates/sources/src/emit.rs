@@ -71,6 +71,33 @@ pub fn socket_default(socket_path: &Path) -> String {
     )
 }
 
+/// POSIX function that turns a string into JSON string *contents*.
+///
+/// Called as `json_escape "$VALUE"`. The result is interpolated into a
+/// `"%s"` slot in a `printf` JSON template, so it must be legal inside a
+/// JSON string: backslash first, then quote, then control characters as
+/// `\t` / `\r` / `\n`. A raw tab or newline here is why `serde_json` used
+/// to drop the whole event while the hook still exited 0.
+///
+/// `awk` is used instead of `sed` so a newline in `$PWD` stays one socket
+/// line. GNU-only `sed` looping is not portable.
+pub fn json_escape_function() -> String {
+    r#"json_escape() {
+  printf '%s' "$1" | awk '
+    BEGIN { ORS="" }
+    {
+      if (NR > 1) printf "\\n"
+      s = $0
+      gsub(/\\/, "\\\\", s)
+      gsub(/"/, "\\\"", s)
+      gsub(/\t/, "\\t", s)
+      gsub(/\r/, "\\r", s)
+      printf "%s", s
+    }'
+}"#
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +198,109 @@ mod tests {
             started.elapsed() < std::time::Duration::from_secs(2),
             "a missing daemon should cost nothing"
         );
+    }
+
+    /// Run the generated `json_escape` under `sh` and wrap the result as a
+    /// JSON string. Returns `None` when this machine has no `sh`.
+    fn json_string_via_sh(input: &str) -> Option<String> {
+        let script = format!(
+            "{}\nprintf '%s' \"$(json_escape \"$CONTEXTD_JSON_ESCAPE_INPUT\")\"\n",
+            json_escape_function()
+        );
+        let output = std::process::Command::new("sh")
+            .env("CONTEXTD_JSON_ESCAPE_INPUT", input)
+            .arg("-c")
+            .arg(script)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            panic!(
+                "json_escape failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    fn decoded_json_string(input: &str) -> Option<String> {
+        let escaped = json_string_via_sh(input)?;
+        let payload = format!(r#"{{"x":"{escaped}"}}"#);
+        let value: serde_json::Value = serde_json::from_str(&payload).unwrap_or_else(|err| {
+            panic!("json_escape produced invalid JSON for {input:?}: {err}\n{payload}")
+        });
+        Some(
+            value["x"]
+                .as_str()
+                .expect("x should be a string")
+                .to_string(),
+        )
+    }
+
+    #[test]
+    fn json_escape_round_trips_quotes_and_backslashes() {
+        let Some(got) = decoded_json_string(r#"say "hi""#) else {
+            return;
+        };
+        assert_eq!(got, r#"say "hi""#);
+
+        let Some(got) = decoded_json_string(r"a\b") else {
+            return;
+        };
+        assert_eq!(got, r"a\b");
+
+        let Some(got) = decoded_json_string(r#"quote"and\slash"#) else {
+            return;
+        };
+        assert_eq!(got, r#"quote"and\slash"#);
+    }
+
+    #[test]
+    fn json_escape_encodes_a_tab_so_serde_json_accepts_the_line() {
+        // The old `sed 's/\\/\\\\/g; s/"/\\"/g'` left tabs raw. JSON forbids
+        // that, so a commit subject with a tab never reached ingest.
+        let input = "fix:\tlogin";
+        let Some(escaped) = json_string_via_sh(input) else {
+            return;
+        };
+        assert!(
+            !escaped.contains('\t'),
+            "a raw tab is illegal inside a JSON string: {escaped:?}"
+        );
+        let Some(got) = decoded_json_string(input) else {
+            return;
+        };
+        assert_eq!(got, input);
+    }
+
+    #[test]
+    fn json_escape_keeps_a_newline_as_one_socket_line() {
+        let input = "first\nsecond";
+        let Some(escaped) = json_string_via_sh(input) else {
+            return;
+        };
+        assert!(
+            !escaped.contains('\n'),
+            "a raw newline would split the socket payload: {escaped:?}"
+        );
+        let Some(got) = decoded_json_string(input) else {
+            return;
+        };
+        assert_eq!(got, input);
+    }
+
+    #[test]
+    fn json_escape_is_valid_posix_shell() {
+        let status = std::process::Command::new("sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(json_escape_function())
+            .status();
+        if let Ok(status) = status {
+            assert!(
+                status.success(),
+                "json_escape does not parse:\n{}",
+                json_escape_function()
+            );
+        }
     }
 }

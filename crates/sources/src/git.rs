@@ -80,6 +80,7 @@ fn render_hook(spec: &HookSpec, socket_path: &Path) -> String {
     let socket = crate::emit::socket_default(socket_path);
     let emit = crate::emit::emit_function();
     let emit_fn = crate::emit::EMIT_FN;
+    let escape = crate::emit::json_escape_function();
 
     format!(
         r#"#!/bin/sh
@@ -99,9 +100,7 @@ elif [ -f "$PRIOR_HOOK" ]; then
   sh "$PRIOR_HOOK" "$@" || exit $?
 fi
 
-json_escape() {{
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
-}}
+{escape}
 
 TIMESTAMP=$(date +%s000)
 REPO=$(git rev-parse --show-toplevel 2>/dev/null || true)
@@ -471,6 +470,24 @@ mod tests {
                 "{name} must escape the path; a quote in it must not break JSON"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn json_escape_is_the_shared_awk_implementation() {
+        // A two-substitution sed leaves tabs raw, which serde_json rejects.
+        let repo = temp_repo("shared-json-escape");
+        install_hooks(&repo, &socket()).unwrap();
+        let hook = read_hook(&repo, "post-commit");
+        assert!(
+            hook.contains(r#"gsub(/\\/, "\\\\", s)"#),
+            "hooks must use the shared awk json_escape from emit.rs"
+        );
+        assert!(
+            !hook.contains(r#"sed 's/\\/\\\\/g; s/"/\\"/g'"#),
+            "the old quote-only sed must not remain in the hook"
+        );
+        assert!(hook.contains(r#"$(json_escape "$MESSAGE")"#));
     }
 
     #[cfg(unix)]
