@@ -178,6 +178,14 @@ async fn enrich_one(
 
     // Embed the summary rather than the raw JSON where we have one: it makes
     // semantic search match on meaning instead of on key names and punctuation.
+    if event.use_case.is_some() && payload_needs_compaction(&event.raw.payload) {
+        let compact = compact_payload(&event.raw.payload, event.summary.as_deref());
+        let conn = store.writer().await;
+        if let Err(err) = replace_payload(&conn, event_id, &compact) {
+            warn!(event_id, error = ?err, "failed to compact a long payload");
+        }
+    }
+
     let text = if event.use_case.is_some() {
         // Already classified. Do not rewrite analysis on every embed retry.
         event
@@ -209,15 +217,16 @@ async fn enrich_one(
         };
 
         {
-            let conn = store.writer().await;
-            if let Err(err) = record_analysis(&conn, event_id, &enrichment) {
+            let mut conn = store.writer().await;
+            if let Err(err) = record_analysis_and_maybe_compact(
+                &mut conn,
+                event_id,
+                &enrichment,
+                decision,
+                &event.raw.payload,
+                analysis.summary.as_deref(),
+            ) {
                 warn!(event_id, error = ?err, "failed to record analysis");
-            }
-            if decision == Decision::Summarize {
-                let compact = compact_payload(&event.raw.payload, analysis.summary.as_deref());
-                if let Err(err) = replace_payload(&conn, event_id, &compact) {
-                    warn!(event_id, error = ?err, "failed to compact a long payload");
-                }
             }
         }
 
@@ -288,6 +297,28 @@ fn compact_payload(payload: &Value, summary: Option<&str>) -> Value {
         compact.insert("text".to_string(), Value::String(text.to_string()));
     }
     Value::Object(compact)
+}
+
+fn payload_needs_compaction(payload: &Value) -> bool {
+    // Same threshold as `pipeline::decision::LONG_PAYLOAD_CHARS`.
+    payload.to_string().chars().count() > 512
+}
+
+fn record_analysis_and_maybe_compact(
+    conn: &mut rusqlite::Connection,
+    event_id: &str,
+    enrichment: &Enrichment,
+    decision: Decision,
+    payload: &Value,
+    summary: Option<&str>,
+) -> rusqlite::Result<()> {
+    let tx = conn.transaction()?;
+    record_analysis(&tx, event_id, enrichment)?;
+    if decision == Decision::Summarize {
+        replace_payload(&tx, event_id, &compact_payload(payload, summary))?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 fn now_ms() -> u64 {
@@ -579,6 +610,40 @@ mod tests {
         assert!(
             stored.raw.payload.to_string().chars().count() < 512,
             "Summarize must not leave the payload stored whole"
+        );
+    }
+
+    #[tokio::test]
+    async fn already_classified_rows_still_retry_payload_compaction() {
+        // If analysis lands and compaction does not, the next sweep used to
+        // take the embedding-only path and leave the bulky payload forever.
+        let store = Arc::new(Store::open(&test_config_in_memory()).unwrap());
+        {
+            let conn = store.writer().await;
+            insert_event(&conn, &verbose("verbose")).unwrap();
+            record_analysis(
+                &conn,
+                "verbose",
+                &Enrichment {
+                    use_case: Some("coding".to_string()),
+                    memory_type: Some("episodic".to_string()),
+                    summary: Some("ran `cargo test`".to_string()),
+                },
+            )
+            .unwrap();
+        }
+
+        enrich_offline(&store, "verbose").await;
+
+        let reader = store.reader().unwrap();
+        let stored = get_event_by_id(&reader, "verbose").unwrap().unwrap();
+        assert!(
+            stored.raw.payload.get("output").is_none(),
+            "a classified row must still compact a leftover long payload"
+        );
+        assert_eq!(
+            stored.raw.payload.get("command").and_then(|v| v.as_str()),
+            Some("cargo test")
         );
     }
 }
