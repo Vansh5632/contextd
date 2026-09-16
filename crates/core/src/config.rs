@@ -92,7 +92,8 @@ pub fn data_dir() -> PathBuf {
 ///
 /// Prefers `XDG_RUNTIME_DIR`, which is the correct home for sockets: it is
 /// user-private and cleaned up on logout. Falls back to the data directory
-/// rather than `/tmp`, so the socket is never world-accessible.
+/// rather than `/tmp`. The socket inode is always `0600` after bind, including
+/// when this fallback is used.
 pub fn runtime_dir() -> PathBuf {
     match std::env::var_os("XDG_RUNTIME_DIR") {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir).join("contextd"),

@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use contextd_core::event::RawEvent;
 use contextd_core::protocol::ContextRequest;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{UnixListener, UnixStream},
@@ -23,15 +23,9 @@ pub enum InboundLine {
     Query(ContextRequest),
 }
 
-/// Starts a Unix domain socket listener.
-/// Event JSON lines are ingested. `{"query":"now"}` lines get a JSON reply.
-pub async fn start_shell_listener(
-    socket_path: PathBuf,
-    tx: broadcast::Sender<RawEvent>,
-    query_tx: mpsc::Sender<ContextQuery>,
-) -> Result<()> {
+fn bind_private_listener(socket_path: &Path) -> Result<UnixListener> {
     if socket_path.exists() {
-        std::fs::remove_file(&socket_path).with_context(|| {
+        std::fs::remove_file(socket_path).with_context(|| {
             format!(
                 "failed to remove existing socket at {}",
                 socket_path.display()
@@ -39,8 +33,32 @@ pub async fn start_shell_listener(
         })?;
     }
 
-    let listener = UnixListener::bind(&socket_path)
+    let listener = UnixListener::bind(socket_path)
         .with_context(|| format!("failed to bind unix socket at {}", socket_path.display()))?;
+    restrict_socket_permissions(socket_path).with_context(|| {
+        format!(
+            "failed to restrict socket permissions at {}",
+            socket_path.display()
+        )
+    })?;
+    Ok(listener)
+}
+
+fn restrict_socket_permissions(socket_path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(socket_path)?.permissions();
+    perms.set_mode(0o600);
+    std::fs::set_permissions(socket_path, perms)
+}
+
+/// Starts a Unix domain socket listener.
+/// Event JSON lines are ingested. `{"query":"now"}` lines get a JSON reply.
+pub async fn start_shell_listener(
+    socket_path: PathBuf,
+    tx: broadcast::Sender<RawEvent>,
+    query_tx: mpsc::Sender<ContextQuery>,
+) -> Result<()> {
+    let listener = bind_private_listener(&socket_path)?;
     info!("Shell listener bound at {}", socket_path.display());
 
     loop {
@@ -339,5 +357,54 @@ mod tests {
             .await
             .expect("client should receive a reply line");
         assert!(reply.contains("recent_activity"));
+    }
+
+    fn temp_socket_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "contextd-private-socket-{}.sock",
+            ulid::Ulid::new()
+        ))
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bind_private_listener_sets_owner_only_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let socket_path = temp_socket_path();
+        let listener =
+            bind_private_listener(&socket_path).expect("owner-only listener should bind");
+        let mode = std::fs::metadata(&socket_path)
+            .expect("socket inode should exist after bind")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "query socket must not inherit a world-connectable umask"
+        );
+
+        UnixStream::connect(&socket_path)
+            .await
+            .expect("same-uid clients must still connect at 0600");
+
+        drop(listener);
+        std::fs::remove_file(&socket_path).ok();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bind_private_listener_replaces_a_stale_socket() {
+        let socket_path = temp_socket_path();
+        let first = bind_private_listener(&socket_path).expect("first bind");
+        drop(first);
+
+        let second = bind_private_listener(&socket_path).expect("rebind after drop");
+        UnixStream::connect(&socket_path)
+            .await
+            .expect("rebound socket should accept same-uid connect");
+
+        drop(second);
+        std::fs::remove_file(&socket_path).ok();
     }
 }
