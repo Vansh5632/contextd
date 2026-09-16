@@ -106,7 +106,7 @@ pub fn json_escape_function() -> String {
       }
     }'
 }"###
-    .to_string()
+        .to_string()
 }
 
 #[cfg(test)]
