@@ -67,8 +67,8 @@ const EVENT_COLUMNS: &[(&str, &str)] = &[
     ("memory_type", "TEXT"),
     // Short human-readable form, used when a briefing cannot afford the payload.
     ("summary", "TEXT"),
-    // When enrichment last touched this row. NULL means "still needs work",
-    // which is what the enrichment backlog query looks for.
+    // When a vector was stored for this row. NULL means it still needs an
+    // embedding; analysis may already be present (`use_case` set).
     ("enriched_at_ms", "INTEGER"),
 ];
 
@@ -101,11 +101,16 @@ fn create_indices(conn: &Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp_ms DESC)",
         // Session-scoped reads for working memory.
         "CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, timestamp_ms DESC)",
-        // The enrichment backlog. Indexing timestamp rather than the predicate
-        // column is what lets `ORDER BY timestamp_ms ASC` read straight off the
-        // index instead of sorting into a temp B-tree.
+        // Embedding backlog: analyzed but still waiting for a vector.
+        // Indexing timestamp rather than the predicate column is what lets
+        // `ORDER BY timestamp_ms ASC` read straight off the index instead of
+        // sorting into a temp B-tree.
         "CREATE INDEX IF NOT EXISTS idx_events_backlog
             ON events(timestamp_ms) WHERE enriched_at_ms IS NULL",
+        // Analysis backlog: never classified. Separate from the embed index so
+        // catch-up does not walk a long prefix of already-analyzed rows.
+        "CREATE INDEX IF NOT EXISTS idx_events_analysis_backlog
+            ON events(timestamp_ms) WHERE enriched_at_ms IS NULL AND use_case IS NULL",
         // Superseded by idx_events_timestamp, which the planner prefers anyway.
         "DROP INDEX IF EXISTS idx_events_prune",
         // Earlier name for the backlog index, keyed on the wrong column.
@@ -170,7 +175,7 @@ pub fn record_analysis(conn: &Connection, event_id: &str, enrichment: &Enrichmen
     Ok(())
 }
 
-/// Declare an event fully processed, removing it from the enrichment backlog.
+/// Declare an event fully processed, removing it from the embedding backlog.
 pub fn mark_enriched(conn: &Connection, event_id: &str, enriched_at_ms: u64) -> Result<()> {
     conn.execute(
         "UPDATE events SET enriched_at_ms = ?2 WHERE id = ?1",
@@ -195,19 +200,34 @@ pub struct Enrichment {
     pub summary: Option<String>,
 }
 
-/// Events that have never been enriched, oldest first.
+/// Events that still need rule-based analysis, oldest first.
 ///
-/// This is what makes enrichment survive a restart: the in-memory queue is
-/// lossy by design, but the backlog is in the database.
-pub fn get_enrichment_backlog(conn: &Connection, limit: usize) -> Result<Vec<ProcessedEvent>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, timestamp_ms, source, payload, score, session_id, use_case, memory_type, summary
-         FROM events
-         WHERE enriched_at_ms IS NULL
-         ORDER BY timestamp_ms ASC
-         LIMIT ?1",
-    )?;
+/// `use_case` is the sentinel: analysis always writes one, and `summary` may
+/// stay empty even after a successful pass.
+pub fn get_analysis_backlog(conn: &Connection, limit: usize) -> Result<Vec<ProcessedEvent>> {
+    get_backlog(conn, limit, "use_case IS NULL")
+}
 
+/// Events that have analysis but no vector yet, oldest first.
+///
+/// These stay claimable until Ollama is back; they must not block unclassified
+/// newer rows from getting analysis.
+pub fn get_embedding_backlog(conn: &Connection, limit: usize) -> Result<Vec<ProcessedEvent>> {
+    get_backlog(conn, limit, "use_case IS NOT NULL")
+}
+
+fn get_backlog(
+    conn: &Connection,
+    limit: usize,
+    analysis_predicate: &str,
+) -> Result<Vec<ProcessedEvent>> {
+    let sql = format!(
+        "{EVENT_SELECT}
+         WHERE enriched_at_ms IS NULL AND {analysis_predicate}
+         ORDER BY timestamp_ms ASC
+         LIMIT ?1"
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([limit as i64], processed_from_row)?;
 
     let mut events = Vec::new();
