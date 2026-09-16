@@ -168,7 +168,8 @@ pub fn default_profile() -> PathBuf {
 }
 
 /// A systemd user unit that keeps the daemon running.
-pub fn systemd_unit(executable: &Path) -> String {
+pub fn systemd_unit(executable: &Path, working_directory: &Path) -> String {
+    let wd = absolute_dir(working_directory);
     format!(
         "[Unit]\n\
          Description=contextd — local context engine for AI coding agents\n\
@@ -178,6 +179,7 @@ pub fn systemd_unit(executable: &Path) -> String {
          [Service]\n\
          Type=simple\n\
          ExecStart={exe} run\n\
+         WorkingDirectory={wd}\n\
          Restart=on-failure\n\
          RestartSec=5\n\
          # The daemon is deliberately low priority: it must never compete with\n\
@@ -189,7 +191,22 @@ pub fn systemd_unit(executable: &Path) -> String {
          [Install]\n\
          WantedBy=default.target\n",
         exe = executable.display(),
+        wd = systemd_escape_path(&wd),
     )
+}
+
+fn absolute_dir(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    }
+}
+
+fn systemd_escape_path(path: &Path) -> String {
+    path.display().to_string().replace('%', "%%")
 }
 
 /// `~/.config/systemd/user/contextd.service`
@@ -202,8 +219,12 @@ pub fn systemd_unit_path() -> PathBuf {
 }
 
 /// Write the systemd unit, creating directories as needed.
-pub fn install_systemd_unit(path: &Path, executable: &Path) -> std::io::Result<Outcome> {
-    let unit = systemd_unit(executable);
+pub fn install_systemd_unit(
+    path: &Path,
+    executable: &Path,
+    working_directory: &Path,
+) -> std::io::Result<Outcome> {
+    let unit = systemd_unit(executable, working_directory);
 
     if std::fs::read_to_string(path).unwrap_or_default() == unit {
         return Ok(Outcome::AlreadyCurrent);
@@ -435,11 +456,18 @@ mod tests {
 
     #[test]
     fn the_systemd_unit_restarts_the_daemon_but_stays_out_of_the_way() {
-        let unit = systemd_unit(Path::new("/usr/local/bin/contextd"));
+        let unit = systemd_unit(
+            Path::new("/usr/local/bin/contextd"),
+            Path::new("/src/thing"),
+        );
 
         // Naming the subcommand rather than relying on the bare-invocation
         // default keeps the unit readable and survives a change to that default.
         assert!(unit.contains("ExecStart=/usr/local/bin/contextd run"));
+        assert!(
+            unit.contains("WorkingDirectory=/src/thing"),
+            "the unit must pin the tree so systemd does not watch $HOME"
+        );
         assert!(unit.contains("Restart=on-failure"));
         assert!(unit.contains("WantedBy=default.target"));
         // A background watcher must never compete with the compiler it watches.
@@ -448,11 +476,44 @@ mod tests {
     }
 
     #[test]
+    fn the_systemd_working_directory_is_always_absolute() {
+        let unit = systemd_unit(Path::new("/usr/local/bin/contextd"), Path::new("thing"));
+        assert!(
+            !unit.contains("WorkingDirectory=thing\n"),
+            "systemd rejects a relative WorkingDirectory"
+        );
+        let cwd = std::env::current_dir().unwrap();
+        let expected = format!("WorkingDirectory={}", cwd.join("thing").display());
+        assert!(unit.contains(&expected), "unit was:\n{unit}");
+    }
+
+    #[test]
+    fn the_systemd_working_directory_escapes_percent_specifiers() {
+        let unit = systemd_unit(
+            Path::new("/usr/local/bin/contextd"),
+            Path::new("/work/100%done"),
+        );
+        assert!(
+            unit.contains("WorkingDirectory=/work/100%%done"),
+            "literal % must be doubled so systemd does not treat it as a specifier; unit was:\n{unit}"
+        );
+        assert!(
+            !unit.contains("WorkingDirectory=/work/100%done\n"),
+            "an unescaped % in WorkingDirectory is a specifier, not a path character"
+        );
+    }
+
+    #[test]
     fn writing_the_unit_creates_its_directory() {
         let path = temp_file("unit").with_file_name("systemd/user/contextd.service");
 
         assert_eq!(
-            install_systemd_unit(&path, Path::new("/usr/local/bin/contextd")).unwrap(),
+            install_systemd_unit(
+                &path,
+                Path::new("/usr/local/bin/contextd"),
+                Path::new("/src/thing"),
+            )
+            .unwrap(),
             Outcome::Installed
         );
         assert!(path.exists());
@@ -462,15 +523,16 @@ mod tests {
     fn rewriting_an_identical_unit_reports_no_change() {
         let path = temp_file("unit2").with_file_name("systemd/user/contextd.service");
         let exe = Path::new("/usr/local/bin/contextd");
+        let wd = Path::new("/src/thing");
 
-        install_systemd_unit(&path, exe).unwrap();
+        install_systemd_unit(&path, exe, wd).unwrap();
         assert_eq!(
-            install_systemd_unit(&path, exe).unwrap(),
+            install_systemd_unit(&path, exe, wd).unwrap(),
             Outcome::AlreadyCurrent
         );
 
         assert_eq!(
-            install_systemd_unit(&path, Path::new("/opt/contextd")).unwrap(),
+            install_systemd_unit(&path, Path::new("/opt/contextd"), wd).unwrap(),
             Outcome::Updated
         );
     }

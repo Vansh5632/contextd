@@ -5,7 +5,7 @@
 //! dependency list is one of the few things standing between "cargo install
 //! contextd" and a two-minute build.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use contextd_core::config::AppConfig;
 use contextd_core::protocol::ContextRequest;
@@ -180,7 +180,8 @@ pub fn run_install(config: &AppConfig) -> anyhow::Result<()> {
     }
 
     let unit_path = install::systemd_unit_path();
-    match install::install_systemd_unit(&unit_path, &executable) {
+    let working_directory = systemd_working_directory(config)?;
+    match install::install_systemd_unit(&unit_path, &executable, &working_directory) {
         Ok(Outcome::AlreadyCurrent) => println!("systemd    already set up"),
         Ok(_) => println!("systemd    unit written to {}", unit_path.display()),
         Err(err) => println!("systemd    could not write the unit: {err}"),
@@ -255,9 +256,23 @@ fn write_default_config(config: &AppConfig) -> anyhow::Result<()> {
 
 /// Where the daemon should watch, given the config and where it was started.
 pub fn watch_root(config: &AppConfig) -> std::io::Result<PathBuf> {
-    match config.watch_root.as_deref().map(Path::to_path_buf) {
-        Some(root) => Ok(root),
+    match config.watch_root.as_deref() {
+        Some(root) if root.is_absolute() => Ok(root.to_path_buf()),
+        Some(root) => Ok(std::env::current_dir()?.join(root)),
         None => std::env::current_dir(),
+    }
+}
+
+/// Directory the systemd unit should start in.
+///
+/// Relative `watch_root` values are resolved against this directory at runtime,
+/// so it must be the install-time cwd rather than the already-joined watch
+/// path. Otherwise a config of `thing` becomes `/src/thing/thing` once the
+/// unit has `WorkingDirectory=/src/thing`.
+pub fn systemd_working_directory(config: &AppConfig) -> std::io::Result<PathBuf> {
+    match config.watch_root.as_deref() {
+        Some(root) if root.is_absolute() => Ok(root.to_path_buf()),
+        _ => std::env::current_dir(),
     }
 }
 
@@ -351,6 +366,48 @@ mod tests {
         assert_eq!(
             watch_root(&config).unwrap(),
             std::env::current_dir().unwrap()
+        );
+    }
+
+    #[test]
+    fn a_relative_watch_root_is_resolved_against_cwd() {
+        let config = AppConfig {
+            watch_root: Some(PathBuf::from("thing")),
+            ..AppConfig::default()
+        };
+
+        assert_eq!(
+            watch_root(&config).unwrap(),
+            std::env::current_dir().unwrap().join("thing")
+        );
+    }
+
+    #[test]
+    fn systemd_working_directory_does_not_resolve_a_relative_watch_root() {
+        // The unit's WorkingDirectory is the directory relative paths are
+        // relative to. Pinning it to cwd.join("thing") would make the daemon
+        // watch thing/thing once it starts there.
+        let config = AppConfig {
+            watch_root: Some(PathBuf::from("thing")),
+            ..AppConfig::default()
+        };
+
+        assert_eq!(
+            systemd_working_directory(&config).unwrap(),
+            std::env::current_dir().unwrap()
+        );
+    }
+
+    #[test]
+    fn systemd_working_directory_keeps_an_absolute_watch_root() {
+        let config = AppConfig {
+            watch_root: Some(PathBuf::from("/src/thing")),
+            ..AppConfig::default()
+        };
+
+        assert_eq!(
+            systemd_working_directory(&config).unwrap(),
+            PathBuf::from("/src/thing")
         );
     }
 
