@@ -480,8 +480,12 @@ mod tests {
         install_hooks(&repo, &socket()).unwrap();
         let hook = read_hook(&repo, "post-commit");
         assert!(
-            hook.contains(r#"gsub(/\\/, "\\\\", s)"#),
+            hook.contains(r#"printf '%s\n' "$1""#),
             "hooks must use the shared awk json_escape from emit.rs"
+        );
+        assert!(
+            hook.contains(r#"\u00%02x"#),
+            "hooks must encode the rest of the JSON C0 range"
         );
         assert!(
             !hook.contains(r#"sed 's/\\/\\\\/g; s/"/\\"/g'"#),

@@ -75,26 +75,37 @@ pub fn socket_default(socket_path: &Path) -> String {
 ///
 /// Called as `json_escape "$VALUE"`. The result is interpolated into a
 /// `"%s"` slot in a `printf` JSON template, so it must be legal inside a
-/// JSON string: backslash first, then quote, then control characters as
-/// `\t` / `\r` / `\n`. A raw tab or newline here is why `serde_json` used
-/// to drop the whole event while the hook still exited 0.
+/// JSON string: backslash, quote, and every byte below 0x20 (`\b` `\t` `\n`
+/// `\f` `\r`, otherwise `\u00XX`). A raw control character here is why
+/// `serde_json` used to drop the whole event while the hook still exited 0.
 ///
-/// `awk` is used instead of `sed` so a newline in `$PWD` stays one socket
-/// line. GNU-only `sed` looping is not portable.
+/// `awk` splits on newlines, so `printf '%s\n'` adds one extra terminator:
+/// a value that already ended in a newline becomes an extra empty record
+/// (kept as `\n`), and a value that did not is unchanged. GNU-only `sed`
+/// looping is not portable.
 pub fn json_escape_function() -> String {
-    r#"json_escape() {
-  printf '%s' "$1" | awk '
-    BEGIN { ORS="" }
+    r###"json_escape() {
+  printf '%s\n' "$1" | awk '
+    BEGIN {
+      ORS=""
+      for (i = 1; i < 32; i++) ord[sprintf("%c", i)] = i
+    }
     {
       if (NR > 1) printf "\\n"
-      s = $0
-      gsub(/\\/, "\\\\", s)
-      gsub(/"/, "\\\"", s)
-      gsub(/\t/, "\\t", s)
-      gsub(/\r/, "\\r", s)
-      printf "%s", s
+      n = length($0)
+      for (i = 1; i <= n; i++) {
+        c = substr($0, i, 1)
+        if (c == "\\") printf "\\\\"
+        else if (c == "\"") printf "\\\""
+        else if (c == "\b") printf "\\b"
+        else if (c == "\t") printf "\\t"
+        else if (c == "\f") printf "\\f"
+        else if (c == "\r") printf "\\r"
+        else if (c in ord) printf "\\u00%02x", ord[c]
+        else printf "%s", c
+      }
     }'
-}"#
+}"###
     .to_string()
 }
 
@@ -281,6 +292,46 @@ mod tests {
         assert!(
             !escaped.contains('\n'),
             "a raw newline would split the socket payload: {escaped:?}"
+        );
+        let Some(got) = decoded_json_string(input) else {
+            return;
+        };
+        assert_eq!(got, input);
+    }
+
+    #[test]
+    fn json_escape_preserves_a_trailing_newline() {
+        // awk drops the final record separator unless we feed it an extra
+        // newline. Command substitution then keeps the encoded `\n`.
+        let input = "hello\n";
+        let Some(got) = decoded_json_string(input) else {
+            return;
+        };
+        assert_eq!(got, input);
+        let Some(got) = decoded_json_string("\n") else {
+            return;
+        };
+        assert_eq!(got, "\n");
+    }
+
+    #[test]
+    fn json_escape_does_not_invent_a_trailing_newline() {
+        let Some(got) = decoded_json_string("hello") else {
+            return;
+        };
+        assert_eq!(got, "hello");
+    }
+
+    #[test]
+    fn json_escape_encodes_every_json_control_character() {
+        // serde_json rejects any raw byte below 0x20, not just tab/CR/LF.
+        let input = "a\u{08}b\u{0c}c\u{01}d";
+        let Some(escaped) = json_string_via_sh(input) else {
+            return;
+        };
+        assert!(
+            !escaped.chars().any(|c| (c as u32) < 0x20),
+            "raw C0 in JSON string: {escaped:?}"
         );
         let Some(got) = decoded_json_string(input) else {
             return;

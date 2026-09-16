@@ -273,7 +273,8 @@ mod tests {
             !snippet.contains(r#"sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\r\n'"#),
             "the quote-only sed must not remain in the snippet"
         );
-        assert!(snippet.contains(r#"gsub(/\\/, "\\\\", s)"#));
+        assert!(snippet.contains(r#"printf '%s\n' "$1""#));
+        assert!(snippet.contains(r#"\u00%02x"#));
     }
 
     #[test]
