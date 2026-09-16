@@ -33,15 +33,44 @@ fn bind_private_listener(socket_path: &Path) -> Result<UnixListener> {
         })?;
     }
 
-    let listener = UnixListener::bind(socket_path)
+    let listener = bind_with_owner_only_umask(socket_path)
         .with_context(|| format!("failed to bind unix socket at {}", socket_path.display()))?;
-    restrict_socket_permissions(socket_path).with_context(|| {
-        format!(
-            "failed to restrict socket permissions at {}",
-            socket_path.display()
-        )
-    })?;
-    Ok(listener)
+    match restrict_socket_permissions(socket_path) {
+        Ok(()) => Ok(listener),
+        Err(err) => keep_or_unlink(socket_path, listener, Err(err)).with_context(|| {
+            format!(
+                "failed to restrict socket permissions at {}",
+                socket_path.display()
+            )
+        }),
+    }
+}
+
+fn bind_with_owner_only_umask(socket_path: &Path) -> std::io::Result<UnixListener> {
+    // 0666 & !0o177 = 0600. umask is process-global, so restore it before any
+    // other thread creates a file. Bind is the only call inside the window.
+    // SAFETY: umask only mutates this process's file-creation mask. The previous
+    // value is restored immediately after bind, so later creates keep the old mask.
+    let previous = unsafe { libc::umask(0o177) };
+    let result = UnixListener::bind(socket_path);
+    // SAFETY: restores the mask saved above.
+    unsafe { libc::umask(previous) };
+    result
+}
+
+fn keep_or_unlink(
+    socket_path: &Path,
+    listener: UnixListener,
+    restrict: std::io::Result<()>,
+) -> std::io::Result<UnixListener> {
+    match restrict {
+        Ok(()) => Ok(listener),
+        Err(err) => {
+            drop(listener);
+            let _ = std::fs::remove_file(socket_path);
+            Err(err)
+        }
+    }
 }
 
 fn restrict_socket_permissions(socket_path: &Path) -> std::io::Result<()> {
@@ -406,5 +435,46 @@ mod tests {
 
         drop(second);
         std::fs::remove_file(&socket_path).ok();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bind_creates_the_socket_with_owner_only_mode_before_chmod() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let socket_path = temp_socket_path();
+        // SAFETY: test-only umask change, restored on the next line.
+        let previous = unsafe { libc::umask(0o000) };
+        let result = bind_with_owner_only_umask(&socket_path);
+        // SAFETY: restores the process umask saved above.
+        unsafe { libc::umask(previous) };
+
+        let listener = result.expect("umask-restricted bind should succeed");
+        let mode = std::fs::metadata(&socket_path)
+            .expect("socket inode should exist after bind")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "the listen inode must be 0600 at creation, not after a later chmod"
+        );
+
+        drop(listener);
+        std::fs::remove_file(&socket_path).ok();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn restrict_failure_unlinks_the_bound_socket() {
+        let socket_path = temp_socket_path();
+        let listener = bind_with_owner_only_umask(&socket_path).expect("bind for cleanup test");
+        let err = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+
+        assert!(keep_or_unlink(&socket_path, listener, Err(err)).is_err());
+        assert!(
+            !socket_path.exists(),
+            "a failed permission restriction must not leave a stale listen inode"
+        );
     }
 }

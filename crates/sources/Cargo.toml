@@ -17,3 +17,4 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 sysinfo = "0.30"
 ulid = { workspace = true }
+libc = "0.2"
