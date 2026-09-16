@@ -377,6 +377,94 @@ mod tests {
         )
     }
 
+    fn git(payload: serde_json::Value, timestamp_ms: u64) -> ProcessedEvent {
+        event(EventSource::Git, timestamp_ms, payload)
+    }
+
+    #[test]
+    fn a_git_event_with_a_repo_becomes_a_repo_node() {
+        let mut graph = KnowledgeGraph::new();
+        graph.observe(&git(
+            json!({
+                "action": "commit",
+                "hash": "abc123",
+                "message": "feat: add graph",
+                "repo": "/home/dev/contextd",
+            }),
+            1_000,
+        ));
+
+        // neighbours() is empty for a node with no edges *and* for a
+        // missing node — node_count + entities() are what prove it exists.
+        assert_eq!(graph.node_count(), 1);
+        assert_eq!(
+            graph.entities(),
+            vec![Entity::new(EntityKind::Repo, "/home/dev/contextd")]
+        );
+    }
+
+    #[test]
+    fn a_git_event_without_a_repo_adds_no_repo_node() {
+        // This is the payload shape hooks sent before this fix. A commit
+        // subject that does not look like an error must not mint a node.
+        let mut graph = KnowledgeGraph::new();
+        graph.observe(&git(
+            json!({
+                "action": "commit",
+                "hash": "abc123",
+                "message": "feat: add graph",
+            }),
+            1_000,
+        ));
+        graph.observe(&git(
+            json!({
+                "action": "checkout",
+                "message": "main",
+                "from": "aaa",
+                "to": "bbb",
+            }),
+            1_100,
+        ));
+        graph.observe(&git(
+            json!({
+                "action": "push",
+                "remote": "origin",
+                "message": "main",
+            }),
+            1_200,
+        ));
+
+        assert_eq!(graph.node_count(), 0);
+    }
+
+    #[test]
+    fn a_blank_repo_does_not_become_an_unnamed_node() {
+        let mut graph = KnowledgeGraph::new();
+        graph.observe(&git(json!({"action": "commit", "repo": ""}), 1_000));
+        graph.observe(&git(json!({"action": "commit", "repo": "   "}), 1_100));
+
+        assert_eq!(graph.node_count(), 0);
+    }
+
+    #[test]
+    fn a_commit_links_the_repo_to_the_file_just_edited() {
+        let mut graph = KnowledgeGraph::new();
+        graph.observe(&file("/home/dev/contextd/src/main.rs", 1_000));
+        graph.observe(&git(
+            json!({
+                "action": "commit",
+                "message": "feat: add graph",
+                "repo": "/home/dev/contextd",
+            }),
+            2_000,
+        ));
+
+        let neighbours = graph.neighbours(&Entity::new(EntityKind::Repo, "/home/dev/contextd"), 5);
+        assert_eq!(neighbours.len(), 1);
+        assert_eq!(neighbours[0].entity.kind, EntityKind::File);
+        assert_eq!(neighbours[0].entity.name, "/home/dev/contextd/src/main.rs");
+    }
+
     #[test]
     fn a_command_run_after_a_file_edit_links_the_two() {
         let mut graph = KnowledgeGraph::new();
