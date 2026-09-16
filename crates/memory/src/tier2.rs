@@ -129,7 +129,7 @@ fn collapse_related(all: Vec<Related>, limit: usize) -> Vec<Related> {
         b.weight
             .partial_cmp(&a.weight)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.entity.name.cmp(&b.entity.name))
+            .then_with(|| a.entity.key().cmp(&b.entity.key()))
     });
     collapsed.truncate(limit);
     collapsed
@@ -332,5 +332,29 @@ mod tests {
         assert_eq!(collapsed.len(), 2);
         assert_eq!(collapsed[0].entity.name, "cargo test");
         assert_eq!(collapsed[1].entity.name, "cargo fmt");
+    }
+
+    #[test]
+    fn collapse_related_breaks_equal_weight_ties_by_entity_identity() {
+        // Same name, different kinds, same weight: sorting by name alone is a
+        // no-op, so HashMap iteration would pick a different survivor each run
+        // when `limit` cuts through the tie.
+        let input = vec![
+            related(EntityKind::File, "build", 1.0),
+            related(EntityKind::Command, "build", 1.0),
+        ];
+        let first = collapse_related(input.clone(), 1);
+        for _ in 0..32 {
+            assert_eq!(
+                collapse_related(input.clone(), 1),
+                first,
+                "truncation among equal-weight identities must be stable"
+            );
+        }
+        assert_eq!(
+            first,
+            vec![related(EntityKind::Command, "build", 1.0)],
+            "the survivor must be the identity whose key sorts first"
+        );
     }
 }
