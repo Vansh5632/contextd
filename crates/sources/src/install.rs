@@ -186,7 +186,7 @@ pub fn systemd_unit(executable: &Path, working_directory: &Path) -> String {
          [Install]\n\
          WantedBy=default.target\n",
         exe = executable.display(),
-        wd = wd.display(),
+        wd = systemd_escape_path(&wd),
     )
 }
 
@@ -198,6 +198,10 @@ fn absolute_dir(path: &Path) -> PathBuf {
             .map(|cwd| cwd.join(path))
             .unwrap_or_else(|_| path.to_path_buf())
     }
+}
+
+fn systemd_escape_path(path: &Path) -> String {
+    path.display().to_string().replace('%', "%%")
 }
 
 /// `~/.config/systemd/user/contextd.service`
@@ -453,6 +457,22 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         let expected = format!("WorkingDirectory={}", cwd.join("thing").display());
         assert!(unit.contains(&expected), "unit was:\n{unit}");
+    }
+
+    #[test]
+    fn the_systemd_working_directory_escapes_percent_specifiers() {
+        let unit = systemd_unit(
+            Path::new("/usr/local/bin/contextd"),
+            Path::new("/work/100%done"),
+        );
+        assert!(
+            unit.contains("WorkingDirectory=/work/100%%done"),
+            "literal % must be doubled so systemd does not treat it as a specifier; unit was:\n{unit}"
+        );
+        assert!(
+            !unit.contains("WorkingDirectory=/work/100%done\n"),
+            "an unescaped % in WorkingDirectory is a specifier, not a path character"
+        );
     }
 
     #[test]
