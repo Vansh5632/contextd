@@ -88,12 +88,61 @@ fi
     )
 }
 
+/// Fish spelling of [`shell_snippet`]. Same markers, same JSON payload, fish
+/// events instead of PROMPT_COMMAND / add-zsh-hook.
+pub fn fish_snippet(socket_path: &Path) -> String {
+    let socket = crate::emit::socket_default_fish(socket_path);
+    let emit = crate::emit::emit_function_fish();
+    let emit_fn = crate::emit::EMIT_FN;
+
+    format!(
+        r#"{BEGIN_MARKER}
+# Reports commands you run to the contextd daemon. Managed by `contextd install`.
+# Remove this block to uninstall.
+{socket}
+
+functions -e {emit_fn} __contextd_send __contextd_postexec
+
+{emit}
+
+function __contextd_send
+  set -l __contextd_cmd $argv[1]
+  set -l __contextd_cmd (string replace -a '\' '\\' -- $__contextd_cmd)
+  set -l __contextd_cmd (string replace -a '"' '\"' -- $__contextd_cmd)
+  set -l __contextd_cmd (string replace -a \r '' -- $__contextd_cmd)
+  set -l __contextd_cmd (string replace -a \n '' -- $__contextd_cmd)
+  test -n "$__contextd_cmd"; or return 0
+
+  set -l __contextd_code $argv[2]
+  test -n "$__contextd_code"; or set __contextd_code 0
+
+  {emit_fn} (printf '{{"source":"shell","payload":{{"command":"%s","exit_code":%s,"cwd":"%s"}}}}' \
+    "$__contextd_cmd" "$__contextd_code" "$PWD")
+  return 0
+end
+
+function __contextd_postexec --on-event fish_postexec
+  set -l __contextd_status $status
+  __contextd_send $argv[1] $__contextd_status
+end
+{END_MARKER}
+"#
+    )
+}
+
+fn snippet_for(profile: &Path, socket_path: &Path) -> String {
+    match profile.file_name().and_then(|n| n.to_str()) {
+        Some(name) if name == "config.fish" || name.ends_with(".fish") => fish_snippet(socket_path),
+        _ => shell_snippet(socket_path),
+    }
+}
+
 /// Add or refresh the contextd block in a shell profile.
 ///
 /// The block is delimited by markers so an update rewrites exactly our lines
 /// and leaves everything the user wrote untouched.
 pub fn install_shell_hook(profile: &Path, socket_path: &Path) -> std::io::Result<Outcome> {
-    let snippet = shell_snippet(socket_path);
+    let snippet = snippet_for(profile, socket_path);
     let existing = std::fs::read_to_string(profile).unwrap_or_default();
 
     let Some(block) = find_block(&existing) else {
@@ -452,6 +501,112 @@ mod tests {
 
         unsafe { std::env::set_var("SHELL", "/bin/bash") };
         assert!(default_profile().ends_with(".bashrc"));
+
+        unsafe { std::env::set_var("SHELL", "/usr/bin/fish") };
+        assert!(default_profile().ends_with("config.fish"));
+    }
+
+    #[test]
+    fn installing_into_config_fish_writes_fish_not_posix() {
+        let profile = temp_file("config.fish");
+
+        assert_eq!(
+            install_shell_hook(&profile, &socket()).unwrap(),
+            Outcome::Installed
+        );
+
+        let contents = std::fs::read_to_string(&profile).unwrap();
+        assert!(contents.contains("--on-event fish_postexec"));
+        assert!(contents.contains("functions -e"));
+        assert!(
+            !contents.contains("PROMPT_COMMAND"),
+            "POSIX prompt hook must not land in config.fish"
+        );
+        assert!(
+            !contents.contains("add-zsh-hook"),
+            "zsh hook must not land in config.fish"
+        );
+        assert!(
+            !contents.contains("export "),
+            "POSIX export must not land in config.fish"
+        );
+        assert!(
+            !contents.contains("() {"),
+            "POSIX function syntax must not land in config.fish"
+        );
+    }
+
+    #[test]
+    fn installing_into_bashrc_still_writes_the_posix_snippet() {
+        let profile = temp_file(".bashrc");
+        install_shell_hook(&profile, &socket()).unwrap();
+
+        let contents = std::fs::read_to_string(&profile).unwrap();
+        assert!(contents.contains("PROMPT_COMMAND"));
+        assert!(contents.contains("add-zsh-hook"));
+        assert!(!contents.contains("fish_postexec"));
+    }
+
+    #[test]
+    fn the_fish_snippet_does_not_stack_handlers() {
+        let snippet = fish_snippet(&socket());
+        assert!(
+            snippet.contains("functions -e"),
+            "re-sourcing config.fish must erase the previous handlers"
+        );
+        assert!(snippet.contains("--on-event fish_postexec"));
+    }
+
+    #[test]
+    fn the_fish_snippet_never_makes_the_prompt_wait() {
+        let snippet = fish_snippet(&socket());
+        assert!(
+            snippet.contains("end >/dev/null 2>&1 &"),
+            "the send must background"
+        );
+        assert!(snippet.contains(r#"test -S "$CONTEXTD_SOCKET"; or return 0"#));
+    }
+
+    #[test]
+    fn the_fish_snippet_parses() {
+        let Ok(status) = std::process::Command::new("fish")
+            .arg("-n")
+            .arg("-c")
+            .arg(fish_snippet(&socket()))
+            .status()
+        else {
+            return; // Not installed on this machine.
+        };
+        assert!(status.success(), "the fish snippet does not parse");
+    }
+
+    #[test]
+    fn uninstalling_strips_a_fish_block_and_leaves_the_rest() {
+        let profile = temp_file("config.fish");
+        std::fs::write(&profile, "set -gx EDITOR vim\n").unwrap();
+        install_shell_hook(&profile, &socket()).unwrap();
+
+        assert!(uninstall_shell_hook(&profile).unwrap());
+
+        let contents = std::fs::read_to_string(&profile).unwrap();
+        assert!(!contents.contains("contextd"));
+        assert!(contents.contains("set -gx EDITOR vim"));
+    }
+
+    #[test]
+    fn a_posix_block_already_in_config_fish_is_replaced_with_fish() {
+        let profile = temp_file("config.fish");
+        std::fs::write(&profile, shell_snippet(&socket())).unwrap();
+
+        assert_eq!(
+            install_shell_hook(&profile, &socket()).unwrap(),
+            Outcome::Updated
+        );
+
+        let contents = std::fs::read_to_string(&profile).unwrap();
+        assert!(contents.contains("fish_postexec"));
+        assert!(!contents.contains("PROMPT_COMMAND"));
+        assert_eq!(contents.matches(BEGIN_MARKER).count(), 1);
     }
 
     #[test]

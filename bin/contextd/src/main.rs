@@ -167,9 +167,6 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
         }
     };
 
-    // Everything expensive happens here, off the ingest path.
-    let enrichment = background::enrichment::start(Arc::clone(&store), ollama.clone());
-
     // One daemon run is one session.
     let session_id = Ulid::new().to_string();
     info!("Session {session_id}");
@@ -177,6 +174,10 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
     // Tier 0. Everything here is also in Tier 1; this exists so the common
     // question — "what am I doing right now" — never touches the disk.
     let working = memory::WorkingSet::new(&session_id);
+
+    // Everything expensive happens here, off the ingest path.
+    let enrichment =
+        background::enrichment::start(Arc::clone(&store), ollama.clone(), working.clone());
 
     let tiers = Tiers {
         store: Arc::clone(&store),
@@ -274,8 +275,16 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
                     processed_event.raw.payload
                 );
 
-                // The only thing on the hot path: write the row. Anything that
-                // could block or fail on a model runs later.
+                if pipeline::decision::should_drop(&processed_event) {
+                    debug!(
+                        event_id = processed_event.raw.id.as_str(),
+                        "skipped as noise before storage"
+                    );
+                    continue;
+                }
+
+                // No model I/O on the hot path. Noise is refused here because
+                // working memory and the graph cannot retract a Drop.
                 {
                     let conn = store.writer().await;
                     if let Err(e) = store::db::insert_event(&conn, &processed_event) {

@@ -71,6 +71,47 @@ pub fn socket_default(socket_path: &Path) -> String {
     )
 }
 
+/// Fish spelling of [`socket_default`]: set and export, leave an existing
+/// value alone.
+pub fn socket_default_fish(socket_path: &Path) -> String {
+    format!(
+        "set -q CONTEXTD_SOCKET; or set -gx CONTEXTD_SOCKET {path}\nset -gx CONTEXTD_SOCKET $CONTEXTD_SOCKET",
+        path = socket_path.display()
+    )
+}
+
+/// Fish spelling of [`emit_function`]. Same contract: backgrounded, every
+/// netcat dialect is told to hang up, a missing socket is not an error.
+pub fn emit_function_fish() -> String {
+    format!(
+        r#"function {EMIT_FN}
+  test -S "$CONTEXTD_SOCKET"; or return 0
+
+  # Backgrounded, silenced, and time-bounded on purpose: contextd being slow or
+  # absent must never be something the caller notices. See crates/sources/src/emit.rs.
+  begin
+    if command -q nc
+      # -N (openbsd) and -q0 (gnu) both half-close after stdin ends. Without one
+      # of them nc waits for a daemon that is waiting for nc.
+      printf '%s\n' $argv[1] | nc -U -N "$CONTEXTD_SOCKET"
+      or printf '%s\n' $argv[1] | nc -U -q0 "$CONTEXTD_SOCKET"
+      or begin
+           if command -q timeout
+             printf '%s\n' $argv[1] | timeout 2 nc -U "$CONTEXTD_SOCKET"
+           else
+             printf '%s\n' $argv[1] | nc -U "$CONTEXTD_SOCKET"
+           end
+         end
+    else if command -q socat
+      printf '%s\n' $argv[1] | socat -t0 - "UNIX-CONNECT:$CONTEXTD_SOCKET"
+    end
+  end >/dev/null 2>&1 &
+
+  return 0
+end"#
+    )
+}
+
 /// POSIX function that turns a string into JSON string *contents*.
 ///
 /// Called as `json_escape "$VALUE"`. The result is interpolated into a
@@ -353,5 +394,71 @@ mod tests {
                 json_escape_function()
             );
         }
+    }
+
+    #[test]
+    fn the_fish_send_is_backgrounded_with_its_output_redirected() {
+        let function = emit_function_fish();
+        assert!(
+            function.contains("end >/dev/null 2>&1 &"),
+            "the begin block must be both redirected and backgrounded"
+        );
+    }
+
+    #[test]
+    fn the_fish_emit_asks_every_netcat_dialect_to_hang_up() {
+        let function = emit_function_fish();
+        assert!(function.contains("nc -U -N"), "openbsd half-close");
+        assert!(function.contains("nc -U -q0"), "gnu half-close");
+        assert!(
+            function.contains("timeout 2 nc -U"),
+            "backstop for the rest"
+        );
+        assert!(function.contains("command -q nc"));
+        assert!(function.contains("command -q socat"));
+    }
+
+    #[test]
+    fn the_fish_emit_has_a_path_for_machines_without_netcat() {
+        assert!(emit_function_fish().contains("socat"));
+    }
+
+    #[test]
+    fn the_fish_emit_always_succeeds() {
+        let function = emit_function_fish();
+        assert!(function.contains("return 0"));
+        assert!(
+            function.contains(r#"test -S "$CONTEXTD_SOCKET"; or return 0"#),
+            "a missing socket is not an error"
+        );
+    }
+
+    #[test]
+    fn the_fish_environment_overrides_the_built_in_socket_path() {
+        let lines = socket_default_fish(Path::new("/run/user/1000/contextd/contextd.sock"));
+        assert!(lines.contains(
+            "set -q CONTEXTD_SOCKET; or set -gx CONTEXTD_SOCKET /run/user/1000/contextd/contextd.sock"
+        ));
+        assert!(lines.contains("set -gx CONTEXTD_SOCKET $CONTEXTD_SOCKET"));
+    }
+
+    #[test]
+    fn the_fish_function_is_valid_fish() {
+        let script = format!(
+            "{}\n{}\n",
+            socket_default_fish(Path::new("/nonexistent.sock")),
+            emit_function_fish()
+        );
+
+        let status = std::process::Command::new("fish")
+            .arg("-n")
+            .arg("-c")
+            .arg(&script)
+            .status();
+
+        let Ok(status) = status else {
+            return; // Not installed on this machine.
+        };
+        assert!(status.success(), "generated fish does not parse:\n{script}");
     }
 }

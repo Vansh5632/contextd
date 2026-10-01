@@ -81,6 +81,17 @@ impl WorkingSet {
         inner.events.push_back(event);
     }
 
+    /// Remove an event from working memory, if it is still here.
+    ///
+    /// Called when enrichment decides the event was noise. Must never fail or
+    /// block: losing one eviction is a slightly noisier briefing, not a halted daemon.
+    pub fn forget(&self, event_id: &str) {
+        let Ok(mut inner) = self.inner.write() else {
+            return;
+        };
+        inner.events.retain(|event| event.raw.id != event_id);
+    }
+
     /// The most recent events, newest first, dropping anything past the horizon.
     pub fn recent(&self, limit: usize) -> Vec<ProcessedEvent> {
         let inner = self.read();
@@ -245,5 +256,23 @@ mod tests {
         // keep working rather than take the daemon down with them.
         assert_eq!(set.len(), 0);
         assert!(set.recent(10).is_empty());
+    }
+
+    #[test]
+    fn forget_removes_only_that_event() {
+        let set = WorkingSet::new("s1");
+        let now = now_ms();
+        set.record(event("keep", now));
+        set.record(event("junk", now));
+        set.forget("junk");
+        assert_eq!(ids(&set.recent(10)), vec!["keep"]);
+    }
+
+    #[test]
+    fn forget_of_an_unknown_id_is_a_no_op() {
+        let set = WorkingSet::new("s1");
+        set.record(event("keep", now_ms()));
+        set.forget("never-recorded");
+        assert_eq!(ids(&set.recent(10)), vec!["keep"]);
     }
 }

@@ -71,10 +71,14 @@ impl EnrichmentQueue {
 }
 
 /// Start the enrichment worker. Returns the handle used to feed it.
-pub fn start(store: Arc<Store>, ollama: Option<OllamaClient>) -> EnrichmentQueue {
+pub fn start(
+    store: Arc<Store>,
+    ollama: Option<OllamaClient>,
+    working: memory::WorkingSet,
+) -> EnrichmentQueue {
     let (tx, rx) = mpsc::channel(QUEUE_CAPACITY);
 
-    tokio::spawn(run_worker(Arc::clone(&store), ollama, rx));
+    tokio::spawn(run_worker(Arc::clone(&store), ollama, working, rx));
     tokio::spawn(run_backlog_sweeper(
         store,
         EnrichmentQueue { tx: tx.clone() },
@@ -86,6 +90,7 @@ pub fn start(store: Arc<Store>, ollama: Option<OllamaClient>) -> EnrichmentQueue
 async fn run_worker(
     store: Arc<Store>,
     ollama: Option<OllamaClient>,
+    working: memory::WorkingSet,
     mut rx: mpsc::Receiver<String>,
 ) {
     info!("Enrichment worker started");
@@ -95,7 +100,14 @@ async fn run_worker(
     let mut embed_paused_until: Option<Instant> = None;
 
     while let Some(event_id) = rx.recv().await {
-        enrich_one(&store, ollama.as_ref(), &event_id, &mut embed_paused_until).await;
+        enrich_one(
+            &store,
+            ollama.as_ref(),
+            &working,
+            &event_id,
+            &mut embed_paused_until,
+        )
+        .await;
     }
 
     info!("Enrichment worker stopped");
@@ -157,6 +169,7 @@ async fn run_backlog_sweeper(store: Arc<Store>, queue: EnrichmentQueue) {
 async fn enrich_one(
     store: &Store,
     ollama: Option<&OllamaClient>,
+    working: &memory::WorkingSet,
     event_id: &str,
     embed_paused_until: &mut Option<Instant>,
 ) {
@@ -201,12 +214,14 @@ async fn enrich_one(
 
         if decision == Decision::Drop {
             // Noise. Reclaim the row now rather than carrying it for a week and
-            // letting the pruner rediscover it.
+            // letting the pruner rediscover it. Forget RAM even if SQLite
+            // errors: the briefing must not keep noise because a delete failed.
             let conn = store.writer().await;
             match delete_event(&conn, event_id) {
                 Ok(()) => debug!(event_id, "dropped as noise"),
                 Err(err) => warn!(event_id, error = ?err, "failed to drop noise event"),
             }
+            working.forget(event_id);
             return;
         }
 
@@ -353,8 +368,13 @@ mod tests {
     }
 
     async fn enrich_offline(store: &Store, event_id: &str) {
+        let working = memory::WorkingSet::new("s");
+        enrich_offline_with(store, &working, event_id).await;
+    }
+
+    async fn enrich_offline_with(store: &Store, working: &memory::WorkingSet, event_id: &str) {
         let mut embed_paused_until = None;
-        enrich_one(store, None, event_id, &mut embed_paused_until).await;
+        enrich_one(store, None, working, event_id, &mut embed_paused_until).await;
     }
 
     /// Shell navigation: the scorer gives it 0.1, and it is worth nothing later.
@@ -453,6 +473,47 @@ mod tests {
             get_event_by_id(&reader, "keep").unwrap().is_some(),
             "dropping noise must not touch its neighbours"
         );
+    }
+
+    #[tokio::test]
+    async fn noise_is_forgotten_from_working_memory() {
+        let store = Arc::new(Store::open(&test_config_in_memory()).unwrap());
+        let working = memory::WorkingSet::new("s");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis() as u64)
+            .unwrap_or(1_000);
+
+        let mut junk = noise("junk");
+        junk.raw.timestamp_ms = now;
+        let mut keep = processed("keep");
+        keep.raw.timestamp_ms = now;
+
+        working.record(junk.clone());
+        working.record(keep.clone());
+        {
+            let conn = store.writer().await;
+            insert_event(&conn, &junk).unwrap();
+            insert_event(&conn, &keep).unwrap();
+        }
+
+        enrich_offline_with(&store, &working, "junk").await;
+        enrich_offline_with(&store, &working, "keep").await;
+
+        let ids: Vec<String> = working
+            .recent(10)
+            .into_iter()
+            .map(|event| event.raw.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["keep".to_string()],
+            "a dropped event must leave the 30-minute snapshot"
+        );
+
+        let reader = store.reader().unwrap();
+        assert!(get_event_by_id(&reader, "junk").unwrap().is_none());
+        assert!(get_event_by_id(&reader, "keep").unwrap().is_some());
     }
 
     #[tokio::test]
