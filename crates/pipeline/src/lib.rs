@@ -4,7 +4,9 @@
 //!
 //! - [`heuristics`] is **synchronous**, on the ingest path. It must be fast and
 //!   infallible, because an event that is not scored is an event not stored.
-//! - [`classify`], [`content`], and [`decision`] run **later**, in the
+//! - [`decision::should_drop`] is also allowed on ingest: it is not a model, and
+//!   Tiers 0/2 cannot retract a Drop. Stored analysis still happens later.
+//! - [`classify`], [`content`], and the rest of [`decision`] persist in the
 //!   enrichment worker. They are allowed to be slower, and their output is
 //!   always optional.
 //!

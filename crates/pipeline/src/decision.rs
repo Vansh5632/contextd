@@ -74,6 +74,18 @@ pub fn decide(event: &ProcessedEvent, use_case: UseCase, memory_type: MemoryType
     Decision::Keep
 }
 
+/// True when this event must not be written to SQLite, working memory, or the graph.
+///
+/// Only quiet events can Drop (`decide` never returns Drop at or above
+/// [`NOISE_SCORE`]), so the common ingest path does not run classify/summarize.
+pub fn should_drop(event: &ProcessedEvent) -> bool {
+    if event.score >= NOISE_SCORE {
+        return false;
+    }
+    let analysis = crate::analyze(&event.raw);
+    decide(event, analysis.use_case, analysis.memory_type) == Decision::Drop
+}
+
 fn payload_len(event: &ProcessedEvent) -> usize {
     event.raw.payload.to_string().chars().count()
 }
@@ -81,8 +93,18 @@ fn payload_len(event: &ProcessedEvent) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::heuristics::process_event;
     use contextd_core::event::{EventSource, RawEvent};
     use serde_json::json;
+
+    fn from_shell(command: &str) -> ProcessedEvent {
+        process_event(RawEvent {
+            id: "t".into(),
+            timestamp_ms: 0,
+            source: EventSource::Shell,
+            payload: json!({ "command": command }),
+        })
+    }
 
     fn scored(score: f32, payload: serde_json::Value) -> ProcessedEvent {
         ProcessedEvent::new(
@@ -212,5 +234,45 @@ mod tests {
             Decision::Keep,
             "an event exactly at the floor is not noise"
         );
+    }
+
+    #[test]
+    fn cd_and_ls_are_dropped_before_they_can_be_stored() {
+        assert!(should_drop(&from_shell("cd /repo")));
+        assert!(should_drop(&from_shell("ls -la")));
+    }
+
+    #[test]
+    fn a_real_command_is_not_dropped() {
+        assert!(!should_drop(&from_shell("cargo test")));
+    }
+
+    #[test]
+    fn quiet_research_is_not_dropped() {
+        assert!(!should_drop(&from_shell("man tar")));
+    }
+
+    #[test]
+    fn a_clean_process_exit_is_dropped_but_a_failure_is_not() {
+        let clean = process_event(RawEvent {
+            id: "t".into(),
+            timestamp_ms: 0,
+            source: EventSource::Proc,
+            payload: json!({"action": "process_end", "exit_code": 0}),
+        });
+        let failed = process_event(RawEvent {
+            id: "t".into(),
+            timestamp_ms: 0,
+            source: EventSource::Proc,
+            payload: json!({"action": "process_end", "exit_code": 101}),
+        });
+        assert!(should_drop(&clean));
+        assert!(!should_drop(&failed));
+    }
+
+    #[test]
+    fn events_at_or_above_the_noise_floor_skip_drop_without_changing_decide() {
+        let save = scored(0.3, json!({"path": "/repo/src/main.rs"}));
+        assert!(!should_drop(&save));
     }
 }
