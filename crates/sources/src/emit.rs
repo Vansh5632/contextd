@@ -73,11 +73,20 @@ pub fn socket_default(socket_path: &Path) -> String {
 
 /// Fish spelling of [`socket_default`]: set and export, leave an existing
 /// value alone.
+///
+/// The path is single-quoted. An unquoted path with a space is split into
+/// several `set` values, and the hook then looks for a socket that is not there.
 pub fn socket_default_fish(socket_path: &Path) -> String {
+    let path = fish_single_quote(&socket_path.display().to_string());
     format!(
-        "set -q CONTEXTD_SOCKET; or set -gx CONTEXTD_SOCKET {path}\nset -gx CONTEXTD_SOCKET $CONTEXTD_SOCKET",
-        path = socket_path.display()
+        "set -q CONTEXTD_SOCKET; or set -gx CONTEXTD_SOCKET {path}\nset -gx CONTEXTD_SOCKET $CONTEXTD_SOCKET"
     )
+}
+
+/// Single-quote a value for fish. A `'` inside the value ends the quote,
+/// inserts an escaped quote, and reopens it.
+fn fish_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
 }
 
 /// Fish spelling of [`emit_function`]. Same contract: backgrounded, every
@@ -96,10 +105,11 @@ pub fn emit_function_fish() -> String {
       printf '%s\n' $argv[1] | nc -U -N "$CONTEXTD_SOCKET"
       or printf '%s\n' $argv[1] | nc -U -q0 "$CONTEXTD_SOCKET"
       or begin
+           # A netcat with neither -N nor -q0 waits forever for the daemon.
+           # Start it only when `timeout` can reap it. Skipping the send is
+           # better than leaving a hung nc for every command.
            if command -q timeout
              printf '%s\n' $argv[1] | timeout 2 nc -U "$CONTEXTD_SOCKET"
-           else
-             printf '%s\n' $argv[1] | nc -U "$CONTEXTD_SOCKET"
            end
          end
     else if command -q socat
@@ -112,21 +122,9 @@ end"#
     )
 }
 
-/// POSIX function that turns a string into JSON string *contents*.
-///
-/// Called as `json_escape "$VALUE"`. The result is interpolated into a
-/// `"%s"` slot in a `printf` JSON template, so it must be legal inside a
-/// JSON string: backslash, quote, and every byte below 0x20 (`\b` `\t` `\n`
-/// `\f` `\r`, otherwise `\u00XX`). A raw control character here is why
-/// `serde_json` used to drop the whole event while the hook still exited 0.
-///
-/// `awk` splits on newlines, so `printf '%s\n'` adds one extra terminator:
-/// a value that already ended in a newline becomes an extra empty record
-/// (kept as `\n`), and a value that did not is unchanged. GNU-only `sed`
-/// looping is not portable.
-pub fn json_escape_function() -> String {
-    r###"json_escape() {
-  printf '%s\n' "$1" | awk '
+/// `awk` program shared by the POSIX and fish escapers. Kept in one place so
+/// a control character fixed for git hooks is fixed for `config.fish` too.
+const JSON_ESCAPE_AWK: &str = r###"awk '
     BEGIN {
       ORS=""
       for (i = 1; i < 32; i++) ord[sprintf("%c", i)] = i
@@ -145,9 +143,28 @@ pub fn json_escape_function() -> String {
         else if (c in ord) printf "\\u00%02x", ord[c]
         else printf "%s", c
       }
-    }'
-}"###
-        .to_string()
+    }'"###;
+
+/// POSIX function that turns a string into JSON string *contents*.
+///
+/// Called as `json_escape "$VALUE"`. The result is interpolated into a
+/// `"%s"` slot in a `printf` JSON template, so it must be legal inside a
+/// JSON string: backslash, quote, and every byte below 0x20 (`\b` `\t` `\n`
+/// `\f` `\r`, otherwise `\u00XX`). A raw control character here is why
+/// `serde_json` used to drop the whole event while the hook still exited 0.
+///
+/// `awk` splits on newlines, so `printf '%s\n'` adds one extra terminator:
+/// a value that already ended in a newline becomes an extra empty record
+/// (kept as `\n`), and a value that did not is unchanged. GNU-only `sed`
+/// looping is not portable.
+pub fn json_escape_function() -> String {
+    format!("json_escape() {{\n  printf '%s\\n' \"$1\" | {JSON_ESCAPE_AWK}\n}}")
+}
+
+/// Fish spelling of [`json_escape_function`]. Same awk program, fish function
+/// syntax. Called as `json_escape "$VALUE"`.
+pub fn json_escape_function_fish() -> String {
+    format!("function json_escape\n  printf '%s\\n' \"$argv[1]\" | {JSON_ESCAPE_AWK}\nend")
 }
 
 #[cfg(test)]
@@ -414,6 +431,16 @@ mod tests {
             function.contains("timeout 2 nc -U"),
             "backstop for the rest"
         );
+        assert!(
+            !function.lines().any(|line| {
+                let trimmed = line.trim();
+                trimmed.contains("nc -U")
+                    && !trimmed.contains("nc -U -N")
+                    && !trimmed.contains("nc -U -q0")
+                    && !trimmed.contains("timeout 2")
+            }),
+            "every netcat path must half-close or be wrapped in timeout"
+        );
         assert!(function.contains("command -q nc"));
         assert!(function.contains("command -q socat"));
     }
@@ -437,9 +464,18 @@ mod tests {
     fn the_fish_environment_overrides_the_built_in_socket_path() {
         let lines = socket_default_fish(Path::new("/run/user/1000/contextd/contextd.sock"));
         assert!(lines.contains(
-            "set -q CONTEXTD_SOCKET; or set -gx CONTEXTD_SOCKET /run/user/1000/contextd/contextd.sock"
+            "set -q CONTEXTD_SOCKET; or set -gx CONTEXTD_SOCKET '/run/user/1000/contextd/contextd.sock'"
         ));
         assert!(lines.contains("set -gx CONTEXTD_SOCKET $CONTEXTD_SOCKET"));
+    }
+
+    #[test]
+    fn the_fish_socket_path_is_quoted_when_it_contains_whitespace_or_a_quote() {
+        let lines = socket_default_fish(Path::new("/tmp/my socket/contextd's.sock"));
+        assert!(
+            lines.contains("set -gx CONTEXTD_SOCKET '/tmp/my socket/contextd'\\''s.sock'"),
+            "a space or quote in the socket path must stay one fish word: {lines}"
+        );
     }
 
     #[test]
@@ -460,5 +496,37 @@ mod tests {
             return; // Not installed on this machine.
         };
         assert!(status.success(), "generated fish does not parse:\n{script}");
+    }
+
+    #[test]
+    fn the_fish_json_escape_round_trips_like_the_posix_one() {
+        let script = format!(
+            "{}\nprintf '%s' (json_escape \"$CONTEXTD_JSON_ESCAPE_INPUT\")\n",
+            json_escape_function_fish()
+        );
+        let input = "say \"hi\"\tpath\\a\nb\u{01}";
+        let Ok(output) = std::process::Command::new("fish")
+            .env("CONTEXTD_JSON_ESCAPE_INPUT", input)
+            .arg("-c")
+            .arg(&script)
+            .output()
+        else {
+            return;
+        };
+        assert!(
+            output.status.success(),
+            "fish json_escape failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let escaped = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !escaped.chars().any(|c| (c as u32) < 0x20),
+            "raw C0 in fish JSON string: {escaped:?}"
+        );
+        let payload = format!(r#"{{"x":"{escaped}"}}"#);
+        let value: serde_json::Value = serde_json::from_str(&payload).unwrap_or_else(|err| {
+            panic!("fish json_escape produced invalid JSON: {err}\n{payload}")
+        });
+        assert_eq!(value["x"].as_str(), Some(input));
     }
 }

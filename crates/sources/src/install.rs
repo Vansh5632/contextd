@@ -94,6 +94,7 @@ pub fn fish_snippet(socket_path: &Path) -> String {
     let socket = crate::emit::socket_default_fish(socket_path);
     let emit = crate::emit::emit_function_fish();
     let emit_fn = crate::emit::EMIT_FN;
+    let escape = crate::emit::json_escape_function_fish();
 
     format!(
         r#"{BEGIN_MARKER}
@@ -101,23 +102,22 @@ pub fn fish_snippet(socket_path: &Path) -> String {
 # Remove this block to uninstall.
 {socket}
 
-functions -e {emit_fn} __contextd_send __contextd_postexec
+functions -e {emit_fn} __contextd_send __contextd_postexec json_escape
 
 {emit}
 
+{escape}
+
 function __contextd_send
-  set -l __contextd_cmd $argv[1]
-  set -l __contextd_cmd (string replace -a '\' '\\' -- $__contextd_cmd)
-  set -l __contextd_cmd (string replace -a '"' '\"' -- $__contextd_cmd)
-  set -l __contextd_cmd (string replace -a \r '' -- $__contextd_cmd)
-  set -l __contextd_cmd (string replace -a \n '' -- $__contextd_cmd)
+  set -l __contextd_cmd (json_escape "$argv[1]")
   test -n "$__contextd_cmd"; or return 0
 
   set -l __contextd_code $argv[2]
   test -n "$__contextd_code"; or set __contextd_code 0
 
+  set -l __contextd_cwd (json_escape "$PWD")
   {emit_fn} (printf '{{"source":"shell","payload":{{"command":"%s","exit_code":%s,"cwd":"%s"}}}}' \
-    "$__contextd_cmd" "$__contextd_code" "$PWD")
+    "$__contextd_cmd" "$__contextd_code" "$__contextd_cwd")
   return 0
 end
 
@@ -545,6 +545,28 @@ mod tests {
         assert!(contents.contains("PROMPT_COMMAND"));
         assert!(contents.contains("add-zsh-hook"));
         assert!(!contents.contains("fish_postexec"));
+    }
+
+    #[test]
+    fn the_fish_snippet_json_escapes_command_and_cwd() {
+        let snippet = fish_snippet(&socket());
+        assert!(
+            snippet.contains(r#"set -l __contextd_cmd (json_escape "$argv[1]")"#),
+            "the command must go through the same escape as git hooks"
+        );
+        assert!(
+            snippet.contains(r#"set -l __contextd_cwd (json_escape "$PWD")"#),
+            "a quote in the working directory must not break the JSON line"
+        );
+        assert!(
+            snippet.contains(r#""$__contextd_cwd""#),
+            "the JSON printf must use the escaped cwd, not raw $PWD"
+        );
+        assert!(
+            !snippet.contains("string replace"),
+            "quote-and-strip must not remain in the fish snippet"
+        );
+        assert!(snippet.contains(r#"\u00%02x"#));
     }
 
     #[test]
