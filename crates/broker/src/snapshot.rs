@@ -223,9 +223,7 @@ fn standing_constraints(projection: &Projection) -> Vec<RenderedClaim> {
     let mut claims: Vec<&Claim> = projection
         .claims
         .iter()
-        .filter(|claim| {
-            claim.status == ClaimStatus::Current && claim.kind == ClaimKind::Constraint
-        })
+        .filter(|claim| claim.status == ClaimStatus::Current && claim.kind == ClaimKind::Constraint)
         .collect();
     claims.sort_by(|a, b| {
         a.updated_at_ms
@@ -302,13 +300,15 @@ fn open_work(projection: &Projection, focal_id: Option<&str>) -> Vec<FocalTaskVi
 }
 
 fn has_authored_continuation(projection: &Projection, task_id: &str) -> bool {
-    projection.current_for_task(task_id).any(|claim| match claim.kind {
-        ClaimKind::Decision | ClaimKind::RuledOut | ClaimKind::Unknown => true,
-        ClaimKind::Intent => true,
-        ClaimKind::NextAction => claim.origin != ClaimOrigin::Projector,
-        ClaimKind::Reality => claim.origin != ClaimOrigin::Projector,
-        ClaimKind::Constraint => false,
-    })
+    projection
+        .current_for_task(task_id)
+        .any(|claim| match claim.kind {
+            ClaimKind::Decision | ClaimKind::RuledOut | ClaimKind::Unknown => true,
+            ClaimKind::Intent => true,
+            ClaimKind::NextAction => claim.origin != ClaimOrigin::Projector,
+            ClaimKind::Reality => claim.origin != ClaimOrigin::Projector,
+            ClaimKind::Constraint => false,
+        })
 }
 
 fn other_tasks(projection: &Projection, focal_id: &str) -> Vec<OtherTaskLine> {
@@ -730,16 +730,36 @@ mod tests {
         let mut projection = Projection::default();
         projection.tasks.push(task("t_pool", "fail", 1));
         projection.claims.push(reality(
-            "c_fail", "t_pool", "repo\npytest", "pytest exited 1", 1, ClaimStatus::Superseded, 1,
+            "c_fail",
+            "t_pool",
+            "repo\npytest",
+            "pytest exited 1",
+            1,
+            ClaimStatus::Superseded,
+            1,
         ));
         projection.claims.push(reality(
-            "c_pass", "t_pool", "repo\npytest", "pytest exited 0", 0, ClaimStatus::Current, 2,
+            "c_pass",
+            "t_pool",
+            "repo\npytest",
+            "pytest exited 0",
+            0,
+            ClaimStatus::Current,
+            2,
         ));
         projection.claims.push(note(
-            "c_rule", "t_pool", ClaimKind::Constraint, "do not change the public signature", 2,
+            "c_rule",
+            "t_pool",
+            ClaimKind::Constraint,
+            "do not change the public signature",
+            2,
         ));
         projection.claims.push(note(
-            "c_decision", "t_pool", ClaimKind::Decision, "Idle connections should count toward the pool cap", 2,
+            "c_decision",
+            "t_pool",
+            ClaimKind::Decision,
+            "Idle connections should count toward the pool cap",
+            2,
         ));
         for i in 0..20 {
             projection.claims.push(Claim {
@@ -762,7 +782,10 @@ mod tests {
 
         let snapshot = render(&projection, None, 80);
         assert!(snapshot.truncated);
-        assert_eq!(snapshot.constraints[0].text, "do not change the public signature");
+        assert_eq!(
+            snapshot.constraints[0].text,
+            "do not change the public signature"
+        );
         assert_eq!(snapshot.passed_checks.len(), 1);
         assert_eq!(snapshot.open_work[0].decisions.len(), 1);
         assert!(snapshot.open_work[0].unknowns.len() < 20);
@@ -926,26 +949,50 @@ mod tests {
         let mut projection = Projection::default();
         projection.tasks.push(task("t_pool", "fail", 1));
         projection.claims.push(reality(
-            "c_fail", "t_pool", "repo\npytest", "pytest exited 1", 1, ClaimStatus::Superseded, 1,
+            "c_fail",
+            "t_pool",
+            "repo\npytest",
+            "pytest exited 1",
+            1,
+            ClaimStatus::Superseded,
+            1,
         ));
         projection.claims.push(reality(
-            "c_pass", "t_pool", "repo\npytest", "pytest exited 0", 0, ClaimStatus::Current, 3,
+            "c_pass",
+            "t_pool",
+            "repo\npytest",
+            "pytest exited 0",
+            0,
+            ClaimStatus::Current,
+            3,
         ));
         projection.claims.push(note(
-            "c_decision", "t_pool", ClaimKind::Decision,
-            "Idle connections should count toward the pool cap", 2,
+            "c_decision",
+            "t_pool",
+            ClaimKind::Decision,
+            "Idle connections should count toward the pool cap",
+            2,
         ));
         projection.claims.push(note(
-            "c_ruled", "t_pool", ClaimKind::RuledOut,
-            "mocking the backend does not reproduce the cap", 2,
+            "c_ruled",
+            "t_pool",
+            ClaimKind::RuledOut,
+            "mocking the backend does not reproduce the cap",
+            2,
         ));
 
         let snapshot = render(&projection, None, 1_500);
         assert!(snapshot.focal_task.is_none());
         assert_eq!(snapshot.open_work.len(), 1);
         assert_eq!(snapshot.open_work[0].id, "t_pool");
-        assert_eq!(snapshot.open_work[0].decisions[0].text, "Idle connections should count toward the pool cap");
-        assert_eq!(snapshot.open_work[0].ruled_out[0].text, "mocking the backend does not reproduce the cap");
+        assert_eq!(
+            snapshot.open_work[0].decisions[0].text,
+            "Idle connections should count toward the pool cap"
+        );
+        assert_eq!(
+            snapshot.open_work[0].ruled_out[0].text,
+            "mocking the backend does not reproduce the cap"
+        );
         assert!(snapshot.open_work[0].reality.is_empty());
         assert_eq!(snapshot.passed_checks.len(), 1);
     }
@@ -957,12 +1004,18 @@ mod tests {
         done.status = TaskStatus::Done;
         projection.tasks.push(done);
         projection.claims.push(note(
-            "c_decision", "t_pool", ClaimKind::Decision,
-            "Idle connections should count toward the pool cap", 2,
+            "c_decision",
+            "t_pool",
+            ClaimKind::Decision,
+            "Idle connections should count toward the pool cap",
+            2,
         ));
         projection.claims.push(note(
-            "c_rule", "t_pool", ClaimKind::Constraint,
-            "do not change the public signature", 2,
+            "c_rule",
+            "t_pool",
+            ClaimKind::Constraint,
+            "do not change the public signature",
+            2,
         ));
 
         let snapshot = render(&projection, None, 1_500);
