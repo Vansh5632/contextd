@@ -1,7 +1,12 @@
 mod cli;
 
+use contextd_core::claim::{
+    ClaimConfidence, ClaimError, ClaimEvent, ClaimKind, ClaimOp, ClaimOrigin, FRONTIER_SUBJECT,
+    INTENT_SUBJECT, NO_ACTIVE_TASK, Projection, check_text, validate, validate_against_projection,
+};
 use contextd_core::config::AppConfig;
-use contextd_core::protocol::ContextRequest;
+use contextd_core::event::{EventSource, ProcessedEvent, RawEvent};
+use contextd_core::protocol::{ContextRequest, UserClaimKind};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use store::Store;
@@ -35,16 +40,13 @@ async fn answer_query(
     let store = tiers.store.as_ref();
 
     let result = match &request {
-        ContextRequest::Now { text } => {
-            let query = text.as_deref().unwrap_or_default();
-            broker::snapshot::build(
-                broker::snapshot::SnapshotRequest::new(store, query)
-                    .with_ollama(ollama)
-                    .with_tiers(Some(&tiers.working), Some(&tiers.graph)),
-            )
-            .await
-            .and_then(|snapshot| Ok(serde_json::to_value(snapshot)?))
-        }
+        ContextRequest::Now { text: _ } => broker::snapshot::build(
+            broker::snapshot::SnapshotRequest::new(store, "")
+                .with_ollama(ollama)
+                .with_tiers(Some(&tiers.working), Some(&tiers.graph)),
+        )
+        .await
+        .and_then(|snapshot| Ok(serde_json::to_value(snapshot)?)),
         ContextRequest::Search { text, limit } => {
             let limit = ContextRequest::resolve_limit(*limit);
             broker::search::search(store, ollama, text, limit)
@@ -57,7 +59,16 @@ async fn answer_query(
                 .await
                 .and_then(|results| Ok(serde_json::to_value(results)?))
         }
-        ContextRequest::Intent { text } => record_intent(tiers, text).await,
+        ContextRequest::Intent { text } => record_user_intent(tiers, text).await,
+        ContextRequest::UserClaim { kind, text } => {
+            record_user_claim(tiers, *kind, text.as_deref()).await
+        }
+        ContextRequest::AgentClaim {
+            kind,
+            text,
+            confidence,
+            replaces,
+        } => record_agent_claim(tiers, *kind, text, *confidence, replaces.as_deref()).await,
     };
 
     match result {
@@ -66,28 +77,219 @@ async fn answer_query(
     }
 }
 
-async fn record_intent(tiers: &Tiers, text: &str) -> anyhow::Result<serde_json::Value> {
-    let declared_at_ms = SystemTime::now()
+async fn current_projection(tiers: &Tiers) -> anyhow::Result<Projection> {
+    let conn = tiers.store.reader()?;
+    Ok(store::db::load_projection(&conn)?)
+}
+
+fn mint_event_id() -> String {
+    Ulid::new().to_string()
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as u64)
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    // Both tiers: the database so it survives a restart, Tier 0 so the very
-    // next briefing reflects it without a read.
-    {
-        let conn = tiers.store.writer().await;
-        store::db::set_intent(&conn, text, declared_at_ms)?;
+fn claim_raw(event_id: String, timestamp_ms: u64, body: ClaimEvent) -> RawEvent {
+    RawEvent {
+        id: event_id,
+        timestamp_ms,
+        source: EventSource::Claim,
+        payload: serde_json::to_value(body).unwrap_or_else(|_| serde_json::json!({})),
     }
-    tiers.working.set_intent(contextd_core::event::Intent {
-        text: text.to_string(),
-        declared_at_ms,
-    });
+}
 
-    info!("Intent recorded: {text}");
+async fn append_and_rebuild(
+    tiers: &Tiers,
+    raw: RawEvent,
+) -> anyhow::Result<contextd_core::claim::Projection> {
+    let processed = ProcessedEvent::new(raw, 1.0).with_session(tiers.working.session_id());
+    let conn = tiers.store.writer().await;
+    store::db::insert_claim_event(&conn, &processed)?;
+    Ok(memory::project::rebuild(&conn)?)
+}
+
+fn write_ok(claim_id: &str, task_id: &str) -> anyhow::Result<serde_json::Value> {
     Ok(serde_json::json!({
         "ok": true,
-        "intent": { "text": text, "declared_at_ms": declared_at_ms }
+        "claim_id": claim_id,
+        "task_id": task_id
     }))
+}
+
+fn map_claim_err(error: ClaimError) -> anyhow::Error {
+    anyhow::anyhow!(error.0)
+}
+
+async fn record_user_intent(tiers: &Tiers, text: &str) -> anyhow::Result<serde_json::Value> {
+    let text = check_text(text).map_err(map_claim_err)?;
+    let projection = current_projection(tiers).await?;
+    let event_id = mint_event_id();
+    let timestamp_ms = now_ms();
+    let task_id = memory::project::focal_task(&projection)
+        .map(|task| task.id.clone())
+        .unwrap_or_else(|| memory::project::hashed_id("t_", &[&event_id]));
+    let claim_id = format!("c_{event_id}");
+    let body = ClaimEvent {
+        op: ClaimOp::Assert,
+        claim_id: claim_id.clone(),
+        task_id: task_id.clone(),
+        kind: Some(ClaimKind::Intent),
+        subject: Some(INTENT_SUBJECT.to_string()),
+        text: Some(text.clone()),
+        confidence: Some(ClaimConfidence::Stated),
+        origin: ClaimOrigin::User,
+        outcome: None,
+        artifact_refs: Vec::new(),
+        evidence_ids: Vec::new(),
+        supersedes: None,
+    };
+    validate(ClaimOrigin::User, &body).map_err(map_claim_err)?;
+    append_and_rebuild(tiers, claim_raw(event_id, timestamp_ms, body)).await?;
+    info!("Intent recorded: {text}");
+    write_ok(&claim_id, &task_id)
+}
+
+async fn record_user_claim(
+    tiers: &Tiers,
+    kind: UserClaimKind,
+    text: Option<&str>,
+) -> anyhow::Result<serde_json::Value> {
+    let projection = current_projection(tiers).await?;
+    let focal = memory::project::focal_task(&projection);
+    let event_id = mint_event_id();
+    let timestamp_ms = now_ms();
+
+    if kind == UserClaimKind::Done {
+        let task = focal.ok_or_else(|| anyhow::anyhow!(NO_ACTIVE_TASK))?;
+        let body = ClaimEvent {
+            op: ClaimOp::CloseTask,
+            claim_id: format!("c_{event_id}"),
+            task_id: task.id.clone(),
+            kind: None,
+            subject: None,
+            text: None,
+            confidence: None,
+            origin: ClaimOrigin::User,
+            outcome: None,
+            artifact_refs: Vec::new(),
+            evidence_ids: Vec::new(),
+            supersedes: None,
+        };
+        validate(ClaimOrigin::User, &body).map_err(map_claim_err)?;
+        append_and_rebuild(tiers, claim_raw(event_id, timestamp_ms, body)).await?;
+        return write_ok("", &task.id);
+    }
+
+    if kind == UserClaimKind::Retract {
+        let claim_id = check_text(text.unwrap_or("")).map_err(map_claim_err)?;
+        let body = ClaimEvent {
+            op: ClaimOp::Supersede,
+            claim_id: claim_id.clone(),
+            task_id: projection
+                .claim(&claim_id)
+                .map(|claim| claim.task_id.clone())
+                .unwrap_or_default(),
+            kind: None,
+            subject: None,
+            text: None,
+            confidence: None,
+            origin: ClaimOrigin::User,
+            outcome: None,
+            artifact_refs: Vec::new(),
+            evidence_ids: Vec::new(),
+            supersedes: Some(claim_id.clone()),
+        };
+        validate(ClaimOrigin::User, &body).map_err(map_claim_err)?;
+        validate_against_projection(ClaimOrigin::User, &body, &projection)
+            .map_err(map_claim_err)?;
+        let task_id = body.task_id.clone();
+        append_and_rebuild(tiers, claim_raw(event_id, timestamp_ms, body)).await?;
+        return write_ok(&claim_id, &task_id);
+    }
+
+    let task = focal.ok_or_else(|| anyhow::anyhow!(NO_ACTIVE_TASK))?;
+    let text = check_text(text.unwrap_or("")).map_err(map_claim_err)?;
+    let claim_kind = match kind {
+        UserClaimKind::Constraint => ClaimKind::Constraint,
+        UserClaimKind::Decision => ClaimKind::Decision,
+        UserClaimKind::RuledOut => ClaimKind::RuledOut,
+        UserClaimKind::Retract | UserClaimKind::Done => unreachable!(),
+    };
+    let claim_id = format!("c_{event_id}");
+    let body = ClaimEvent {
+        op: ClaimOp::Assert,
+        claim_id: claim_id.clone(),
+        task_id: task.id.clone(),
+        kind: Some(claim_kind),
+        subject: Some(claim_id.clone()),
+        text: Some(text),
+        confidence: Some(ClaimConfidence::Stated),
+        origin: ClaimOrigin::User,
+        outcome: None,
+        artifact_refs: Vec::new(),
+        evidence_ids: Vec::new(),
+        supersedes: None,
+    };
+    validate(ClaimOrigin::User, &body).map_err(map_claim_err)?;
+    append_and_rebuild(tiers, claim_raw(event_id, timestamp_ms, body)).await?;
+    write_ok(&claim_id, &task.id)
+}
+
+async fn record_agent_claim(
+    tiers: &Tiers,
+    kind: ClaimKind,
+    text: &str,
+    confidence: Option<ClaimConfidence>,
+    replaces: Option<&str>,
+) -> anyhow::Result<serde_json::Value> {
+    let projection = current_projection(tiers).await?;
+    let task =
+        memory::project::focal_task(&projection).ok_or_else(|| anyhow::anyhow!(NO_ACTIVE_TASK))?;
+    let text = check_text(text).map_err(map_claim_err)?;
+    let mut confidence = confidence.unwrap_or(ClaimConfidence::Inferred);
+    if kind == ClaimKind::Unknown {
+        confidence = ClaimConfidence::Hypothesis;
+    }
+    let event_id = mint_event_id();
+    let timestamp_ms = now_ms();
+    let claim_id = format!("c_{event_id}");
+    let subject = if kind == ClaimKind::NextAction {
+        FRONTIER_SUBJECT.to_string()
+    } else {
+        claim_id.clone()
+    };
+    let mut supersedes = replaces.map(str::to_string);
+    if kind == ClaimKind::NextAction {
+        if let Some(frontier) =
+            projection.current_slot(&task.id, ClaimKind::NextAction, FRONTIER_SUBJECT)
+        {
+            if frontier.origin != ClaimOrigin::User {
+                supersedes = Some(frontier.id.clone());
+            }
+        }
+    }
+    let body = ClaimEvent {
+        op: ClaimOp::Assert,
+        claim_id: claim_id.clone(),
+        task_id: task.id.clone(),
+        kind: Some(kind),
+        subject: Some(subject),
+        text: Some(text),
+        confidence: Some(confidence),
+        origin: ClaimOrigin::Agent,
+        outcome: None,
+        artifact_refs: Vec::new(),
+        evidence_ids: Vec::new(),
+        supersedes,
+    };
+    validate(ClaimOrigin::Agent, &body).map_err(map_claim_err)?;
+    validate_against_projection(ClaimOrigin::Agent, &body, &projection).map_err(map_claim_err)?;
+    append_and_rebuild(tiers, claim_raw(event_id, timestamp_ms, body)).await?;
+    write_ok(&claim_id, &task.id)
 }
 
 #[tokio::main]
@@ -121,6 +323,7 @@ async fn main() -> anyhow::Result<()> {
         // background; this process only asks it for the briefing.
         cli::Command::Mcp => mcp::stdio::run(config.socket_path).await,
         cli::Command::Intent(text) => cli::run_intent(&config, &text).await,
+        cli::Command::Claim(claim) => cli::run_claim(&config, claim).await,
         cli::Command::Status => cli::run_status(&config).await,
         cli::Command::Install => cli::run_install(&config),
         cli::Command::Uninstall => cli::run_uninstall(),
@@ -137,6 +340,12 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
     // an agent query never waits behind ingest or the pruner.
     let store = Arc::new(store::Store::open(&config)?);
     info!("Database initialized at {:?}", config.db_path);
+    {
+        let conn = store.writer().await;
+        if let Err(error) = memory::project::rebuild(&conn) {
+            error!("Failed to rebuild working-state projection: {error}");
+        }
+    }
 
     // Tier 2 owns its own tables, so it migrates them itself rather than making
     // the storage crate depend on the crate that sits above it.
@@ -290,6 +499,19 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
                     if let Err(e) = store::db::insert_event(&conn, &processed_event) {
                         error!("Failed to write event to database: {}", e);
                         continue;
+                    }
+                    let has_exit = processed_event.raw.source
+                        == contextd_core::event::EventSource::Shell
+                        && processed_event
+                            .raw
+                            .payload
+                            .get("exit_code")
+                            .and_then(|value| value.as_i64())
+                            .is_some();
+                    if has_exit {
+                        if let Err(e) = memory::project::rebuild(&conn) {
+                            error!("Failed to rebuild working-state projection: {e}");
+                        }
                     }
                 }
 

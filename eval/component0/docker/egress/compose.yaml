@@ -1,0 +1,30 @@
+name: contextd-c0-egress
+
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: proxy.Dockerfile
+    image: contextd-c0-egress:v0
+    container_name: contextd-c0-egress
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      internal:
+        aliases: [egress]
+      outbound: {}
+
+# Explicit subnets: this host's default Docker address pools are exhausted.
+networks:
+  # Agent containers join only this network; it has no route off the host.
+  internal:
+    name: contextd-c0-internal
+    internal: true
+    ipam:
+      config: [{subnet: 10.231.0.0/24}]
+  outbound:
+    name: contextd-c0-outbound
+    ipam:
+      config: [{subnet: 10.231.1.0/24}]

@@ -1,0 +1,81 @@
+{
+  "atoms": [
+    {
+      "id": "finding_idle_not_counted",
+      "role": "required",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "decision_idle_counts",
+      "role": "required",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "constraint_signatures",
+      "role": "constraint",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "constraint_no_new_deps",
+      "role": "constraint",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "ruled_out_mock_backend",
+      "role": "ruled_out",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "ruled_out_lock",
+      "role": "ruled_out",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "stale_redis_counter",
+      "role": "stale",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "unresolved_keepalive_comprehension",
+      "role": "unresolved",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "next_step_create_branch",
+      "role": "next_step",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "optional_host_header_fix",
+      "role": "optional",
+      "selected": false,
+      "stored": false
+    },
+    {
+      "id": "optional_exact_counts",
+      "role": "optional",
+      "selected": false,
+      "stored": false
+    }
+  ],
+  "briefing_tokens": 1122,
+  "event_tokens": 1807,
+  "events_by_source": {
+    "file_system": 6,
+    "git": 1,
+    "shell": 24
+  },
+  "observation_recall": 0.0,
+  "selection_recall": 0.0,
+  "stored_events": 31,
+  "stored_events_in_briefing": 14
+}

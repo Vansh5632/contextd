@@ -1,0 +1,277 @@
+{
+  "provenance": {
+    "backlog_drain_method": "db_poll",
+    "backlog_drain_result": {
+      "events": 31,
+      "method": "db_poll",
+      "missing_embeddings": 0,
+      "status": "drained"
+    },
+    "binary_sha256": "16e0db749736fb1c4fc6985ce9bf77adc55b49cb068cc8dc9de841c1f3a0df56",
+    "config_toml": "db_path = \"/data/events.db\"\nsocket_path = \"/data/contextd.sock\"\nmax_memory_mb = 500\nollama_url = \"http://contextd-c0-ollama:11434\"\nembedding_model = \"nomic-embed-text\"\nwatch_root = \"/work\"\n",
+    "contextd_head": "f6ec62a089cffdf744f151b479226537061eaf84",
+    "diff_sha256": "7f7efe924497c40c05a85d11181d25b3dadb306d030ddf942ad7cae1818e6d2c",
+    "dirty_files": [
+      ".gitignore",
+      "bin/contextd/src/main.rs",
+      "crates/background/Cargo.toml",
+      "crates/background/src/enrichment.rs",
+      "crates/memory/src/working.rs",
+      "crates/pipeline/src/decision.rs",
+      "crates/pipeline/src/lib.rs",
+      "crates/sources/src/emit.rs",
+      "crates/sources/src/install.rs",
+      ".cursor/",
+      "docs/component-0-evaluation.md",
+      "docs/superpowers/",
+      "eval/"
+    ],
+    "embeddings": 31,
+    "followup_sha": "9813a75864933ecab560c7530dee353a02b259ff",
+    "fs_events": 6,
+    "git_events": 1,
+    "head": "9813a75864933ecab560c7530dee353a02b259ff",
+    "head_matches_followup": true,
+    "model_digest": "sha256:0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+    "ollama_image_id": "sha256:2a6e883b917fc543389599dae79918f5cac9e1438890506982f44aa4f5625d01",
+    "ollama_volume": "ro",
+    "pause_s": 3.0,
+    "proc_events": 0,
+    "query_wall_s": 0.18831770701217465,
+    "replay_image_id": "sha256:6dd6ed88d4d699d5a78fb12643ac675a99ac7db942799b4bbc7b58ada6fda826",
+    "reply_trailing_newline": true,
+    "run_apply_steps": 23,
+    "shell_events": 24,
+    "steps_typed": 24
+  },
+  "variation": {
+    "differences": [
+      {
+        "fields": [
+          "recent_activity",
+          "relevant_history"
+        ],
+        "generation": 2
+      },
+      {
+        "fields": [
+          "recent_activity",
+          "relevant_history"
+        ],
+        "generation": 3
+      }
+    ],
+    "generation_count": 3,
+    "identical": false,
+    "summary": "generation 2 differs from generation 1 in recent_activity, relevant_history; generation 3 differs from generation 1 in recent_activity, relevant_history",
+    "views": [
+      {
+        "recent_activity": [
+          {
+            "source": "git",
+            "text": "committed: models: fix default port check in host header"
+          },
+          {
+            "source": "shell",
+            "text": "ran `git add -A && git commit -q -m \"models: fix default port check in host header\"`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `python -m pytest -q -p no:cacheprovider tests/_sync/test_http11.py tests/_async/test_http11.py`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `python -m pytest -q -p no:cacheprovider tests/test_models.py`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `git diff`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `git apply /patches/session_b_fix.patch`"
+          },
+          {
+            "source": "file_system",
+            "text": "created tests/test_models.py"
+          },
+          {
+            "source": "file_system",
+            "text": "created httpcore/_models.py"
+          },
+          {
+            "source": "file_system",
+            "text": "edited httpcore/_models.py"
+          },
+          {
+            "source": "file_system",
+            "text": "edited tests/test_models.py"
+          }
+        ],
+        "related": [
+          "/work/httpcore/_models.py",
+          "/work/tests/test_models.py",
+          "python",
+          "git apply",
+          "git diff"
+        ],
+        "relevant_history": [
+          {
+            "id": "01M3XNBZN2XPPQAGW3E2MHDM5V",
+            "text": "ran `python - <<'EOF'import httpcorefrom httpcore._models import include_request_headersfor url in [\"https://www.example.com/\",\"https://www.example.com:443/\",\"\u2026"
+          },
+          {
+            "id": "01M3XNBSCHYQA1FQJC2AF9NHZG",
+            "text": "ran `grep -rn \"b\\\"host\\\"\\|b\\\"Host\\\"\" httpcore/`"
+          },
+          {
+            "id": "01M3XNB11GGMKW9PJD61HR9SWW",
+            "text": "ran `grep -n \"def handle_request\\|def handle_async_request\" httpcore/_sync/connection_pool.py httpcore/_async/connection_pool.py`"
+          },
+          {
+            "id": "01M3XNBWAH1AD0NTZDPVM2VWCT",
+            "text": "ran `sed -n 1,141p httpcore/_models.py`"
+          }
+        ]
+      },
+      {
+        "recent_activity": [
+          {
+            "source": "git",
+            "text": "committed: models: fix default port check in host header"
+          },
+          {
+            "source": "shell",
+            "text": "ran `git add -A && git commit -q -m \"models: fix default port check in host header\"`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `python -m pytest -q -p no:cacheprovider tests/_sync/test_http11.py tests/_async/test_http11.py`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `python -m pytest -q -p no:cacheprovider tests/test_models.py`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `git diff`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `git apply /patches/session_b_fix.patch`"
+          },
+          {
+            "source": "file_system",
+            "text": "edited tests/test_models.py"
+          },
+          {
+            "source": "file_system",
+            "text": "created httpcore/_models.py"
+          },
+          {
+            "source": "file_system",
+            "text": "edited httpcore/_models.py"
+          },
+          {
+            "source": "file_system",
+            "text": "created tests/test_models.py"
+          }
+        ],
+        "related": [
+          "/work/httpcore/_models.py",
+          "/work/tests/test_models.py",
+          "python",
+          "git apply",
+          "git diff"
+        ],
+        "relevant_history": [
+          {
+            "id": "01M3XNEG3MDTYK2ENSD497VJKJ",
+            "text": "ran `python - <<'EOF'import httpcorefrom httpcore._models import include_request_headersfor url in [\"https://www.example.com/\",\"https://www.example.com:443/\",\"\u2026"
+          },
+          {
+            "id": "01M3XNE9V707TE1R89CGKC52ER",
+            "text": "ran `grep -rn \"b\\\"host\\\"\\|b\\\"Host\\\"\" httpcore/`"
+          },
+          {
+            "id": "01M3XNDHF9A14BD1TWQHKVJRTG",
+            "text": "ran `grep -n \"def handle_request\\|def handle_async_request\" httpcore/_sync/connection_pool.py httpcore/_async/connection_pool.py`"
+          },
+          {
+            "id": "01M3XNECSEA84T9J6RGWVNA9YH",
+            "text": "ran `sed -n 1,141p httpcore/_models.py`"
+          }
+        ]
+      },
+      {
+        "recent_activity": [
+          {
+            "source": "git",
+            "text": "committed: models: fix default port check in host header"
+          },
+          {
+            "source": "shell",
+            "text": "ran `git add -A && git commit -q -m \"models: fix default port check in host header\"`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `python -m pytest -q -p no:cacheprovider tests/_sync/test_http11.py tests/_async/test_http11.py`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `python -m pytest -q -p no:cacheprovider tests/test_models.py`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `git diff`"
+          },
+          {
+            "source": "shell",
+            "text": "ran `git apply /patches/session_b_fix.patch`"
+          },
+          {
+            "source": "file_system",
+            "text": "created tests/test_models.py"
+          },
+          {
+            "source": "file_system",
+            "text": "edited tests/test_models.py"
+          },
+          {
+            "source": "file_system",
+            "text": "edited httpcore/_models.py"
+          },
+          {
+            "source": "file_system",
+            "text": "created httpcore/_models.py"
+          }
+        ],
+        "related": [
+          "/work/httpcore/_models.py",
+          "/work/tests/test_models.py",
+          "python",
+          "git apply",
+          "git diff"
+        ],
+        "relevant_history": [
+          {
+            "id": "01M3XNH0MYP56DBZ1ZZ3H0Z0PJ",
+            "text": "ran `python - <<'EOF'import httpcorefrom httpcore._models import include_request_headersfor url in [\"https://www.example.com/\",\"https://www.example.com:443/\",\"\u2026"
+          },
+          {
+            "id": "01M3XNGTC91HBT6ZMG1J6ATT5N",
+            "text": "ran `grep -rn \"b\\\"host\\\"\\|b\\\"Host\\\"\" httpcore/`"
+          },
+          {
+            "id": "01M3XNG20GD6HM5SB9K0PS18KE",
+            "text": "ran `grep -n \"def handle_request\\|def handle_async_request\" httpcore/_sync/connection_pool.py httpcore/_async/connection_pool.py`"
+          },
+          {
+            "id": "01M3XNGXA9QGRYXQM4B0R581HA",
+            "text": "ran `sed -n 1,141p httpcore/_models.py`"
+          }
+        ]
+      }
+    ]
+  }
+}

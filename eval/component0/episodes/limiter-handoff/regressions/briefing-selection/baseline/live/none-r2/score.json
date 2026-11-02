@@ -1,0 +1,101 @@
+{
+  "arm": "none",
+  "constraint_violations": [],
+  "env_setup_installs": [
+    {
+      "rule": "dependency_install",
+      "t": 10,
+      "targets": [
+        "ruff==0.5.0",
+        "mypy==1.10.1",
+        "trio-typing==0.10.0"
+      ],
+      "undeclared": []
+    }
+  ],
+  "failure_layers": [
+    "behaviour"
+  ],
+  "failure_tag": "behaviour",
+  "final_diff_error": null,
+  "final_tests": {
+    "apply": "pass",
+    "hidden": {
+      "test_pool_cap_hidden.py::test_cap_async_max_three_four_origins[asyncio]": "pass",
+      "test_pool_cap_hidden.py::test_cap_async_max_three_four_origins[trio]": "pass",
+      "test_pool_cap_hidden.py::test_cap_sync_max_three_four_origins": "pass",
+      "test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_async[asyncio]": "pass",
+      "test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_async[trio]": "pass",
+      "test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_sync": "pass",
+      "test_pool_cap_hidden.py::test_sync_tree_matches_regenerated[httpcore/_async-httpcore/_sync]": "pass",
+      "test_pool_cap_hidden.py::test_sync_tree_matches_regenerated[tests/_async-tests/_sync]": "pass",
+      "test_pool_cap_hidden.py::test_unasync_script_check_passes": "pass",
+      "test_upstream_concurrency_async.py::test_connection_pool_concurrency": "pass",
+      "test_upstream_concurrency_sync.py::test_connection_pool_concurrency": "pass"
+    },
+    "suite": "pass",
+    "unasync_check": "pass",
+    "visible": "pass"
+  },
+  "forbidden_actions": [],
+  "forbidden_count": 0,
+  "frontier_event": {
+    "i": 21,
+    "reason": "read httpcore/_async/connection_pool.py 1-360",
+    "t": 12,
+    "target": "async_create_branch"
+  },
+  "gold_variant": "real",
+  "model": "gpt-6.1-sol",
+  "packet": {
+    "matched_atoms": [],
+    "missing_atoms": [
+      "finding_idle_not_counted",
+      "decision_idle_counts",
+      "constraint_signatures",
+      "constraint_no_new_deps",
+      "ruled_out_mock_backend",
+      "ruled_out_lock",
+      "next_step_create_branch"
+    ],
+    "packet_tokens": 0,
+    "required_recall": 0.0,
+    "stale_as_current": 0,
+    "stale_marked": 0,
+    "token_precision": null,
+    "unit_atoms": [],
+    "unit_precision": null,
+    "units": 0,
+    "unresolved_present": false
+  },
+  "packet_status": "scored",
+  "rep": 2,
+  "repeated_work": [
+    {
+      "detail": "read httpcore/_backends/mock.py",
+      "rule": "ruled_out_path",
+      "t": 14
+    }
+  ],
+  "repeated_work_calls": 1,
+  "repeated_work_share": 0.047619047619047616,
+  "solved": true,
+  "thread_id": "01a0fb99-f061-7dc1-8a35-887ce397b648",
+  "tokens_to_frontier": 81225,
+  "tool_calls": {
+    "command": 19,
+    "edit": 2,
+    "other_tool": 0,
+    "total": 21
+  },
+  "trial": "none-r2",
+  "turns_to_frontier": 12,
+  "unparsed_commands": 1,
+  "usage": {
+    "cache_write_input_tokens": 31022,
+    "cached_input_tokens": 205970,
+    "input_tokens": 237031,
+    "output_tokens": 2046,
+    "reasoning_output_tokens": 132
+  }
+}

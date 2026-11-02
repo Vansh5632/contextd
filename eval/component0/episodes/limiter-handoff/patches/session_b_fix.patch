@@ -1,0 +1,39 @@
+diff --git a/httpcore/_models.py b/httpcore/_models.py
+index 9bd80f5..8a65f13 100644
+--- a/httpcore/_models.py
++++ b/httpcore/_models.py
+@@ -116,7 +116,7 @@ def include_request_headers(
+ 
+     if b"host" not in headers_set:
+         default_port = DEFAULT_PORTS.get(url.scheme)
+-        if url.port is None or url.port <= default_port:
++        if url.port is None or url.port == default_port:
+             header_value = url.host
+         else:
+             header_value = b"%b:%d" % (url.host, url.port)
+diff --git a/tests/test_models.py b/tests/test_models.py
+index 7dd6e41..9d45ee4 100644
+--- a/tests/test_models.py
++++ b/tests/test_models.py
+@@ -3,6 +3,7 @@ import typing
+ import pytest
+ 
+ import httpcore
++from httpcore._models import include_request_headers
+ 
+ # URL
+ 
+@@ -84,6 +85,13 @@ def test_request_with_target_extension():
+     assert request.url.target == b"/unescaped|path"
+ 
+ 
++def test_request_host_header_with_non_default_port():
++    headers = include_request_headers(
++        [], url=httpcore.URL("https://www.example.com:80/"), content=None
++    )
++    assert headers == [(b"Host", b"www.example.com:80")]
++
++
+ def test_request_with_invalid_method():
+     with pytest.raises(TypeError) as exc_info:
+         httpcore.Request(123, "https://www.example.com/")  # type: ignore

@@ -1,0 +1,13 @@
+# Test dependencies of encode/httpcore 1.0.9 (98209758), from its pyproject.toml
+# extras [asyncio,trio,http2,socks] and the "Tests" block of requirements.txt.
+# Compiled with: uv pip compile --python-version 3.12 --exclude-newer 2025-04-25
+certifi
+h11>=0.16
+h2>=3,<5
+socksio==1.*
+trio>=0.22.0,<1.0
+anyio>=4.0,<5.0
+pytest==8.2.2
+pytest-httpbin==2.0.0
+pytest-trio==0.8.0
+werkzeug<3.1

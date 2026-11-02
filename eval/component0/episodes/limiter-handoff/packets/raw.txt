@@ -1,0 +1,998 @@
+[session A] $ python - <<'EOF'
+import httpcore
+
+backend = httpcore.MockBackend(
+    [b"HTTP/1.1 200 OK\r\n", b"Content-Length: 2\r\n", b"\r\n", b"ok"]
+)
+stream = backend.connect_tcp("a.example.com", 443)
+print(stream.read(64), stream.read(64))
+print(backend.connect_tcp("b.example.com", 443).read(64))
+with httpcore.ConnectionPool(max_connections=2, network_backend=backend) as pool:
+    pool.request("GET", "https://a.example.com/")
+    print(pool.connections)
+    pool.request("GET", "https://b.example.com/")
+    print(pool.connections)
+EOF
+b'HTTP/1.1 200 OK\r\n' b'Content-Length: 2\r\n'
+b'HTTP/1.1 200 OK\r\n'
+[<HTTPConnection ['https://a.example.com:443', HTTP/1.1, IDLE, Request Count: 1]>]
+[<HTTPConnection ['https://a.example.com:443', HTTP/1.1, IDLE, Request Count: 1]>, <HTTPConnection ['https://b.example.com:443', HTTP/1.1, IDLE, Request Count: 1]>]
+
+----
+
+[session A] note: Mock backend is fine: every connect_tcp gets a fresh stream over its own copy of the buffer, and a finished request leaves its connection IDLE in the pool as it should. Ruled out as the cause.
+
+----
+
+[session A] note: Next suspect: the pool lock or the primitives in _synchronization.py losing a wakeup, so two requests both see room for a new connection.
+
+----
+
+[session A] $ sed -n 232,254p httpcore/_synchronization.py
+class Lock:
+    """
+    This is a standard lock.
+
+    In the sync case `Lock` provides thread locking.
+    In the async case `AsyncLock` provides async locking.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+
+    def __enter__(self) -> Lock:
+        self._lock.acquire()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: types.TracebackType | None = None,
+    ) -> None:
+        self._lock.release()
+
+----
+
+[session A] $ python - <<'EOF'
+import httpcore
+
+backend = httpcore.MockBackend(
+    [b"HTTP/1.1 200 OK\r\n", b"Content-Length: 2\r\n", b"\r\n", b"ok"]
+)
+with httpcore.ConnectionPool(max_connections=2, network_backend=backend) as pool:
+    pool.request("GET", "https://a.example.com/")
+    pool.request("GET", "https://b.example.com/")
+    with pool.stream("GET", "https://c.example.com/") as response:
+        for conn in pool.connections:
+            print(conn)
+        response.read()
+EOF
+<HTTPConnection ['https://a.example.com:443', HTTP/1.1, IDLE, Request Count: 1]>
+<HTTPConnection ['https://b.example.com:443', HTTP/1.1, IDLE, Request Count: 1]>
+<HTTPConnection ['https://c.example.com:443', HTTP/1.1, ACTIVE, Request Count: 1]>
+
+----
+
+[session A] note: Single thread, no concurrency, and it still over-creates: a and b are IDLE, c gets a brand new connection, 3 held with max_connections=2. Nothing can lose a wakeup here, so the lock and synchronization are ruled out.
+
+----
+
+[session A] $ sed -n 305,335p httpcore/_async/connection_pool.py
+            available_connections = [
+                connection
+                for connection in self._connections
+                if connection.can_handle_request(origin) and connection.is_available()
+            ]
+            idle_connections = [
+                connection for connection in self._connections if connection.is_idle()
+            ]
+
+            # There are three cases for how we may be able to handle the request:
+            #
+            # 1. There is an existing connection that can handle the request.
+            # 2. We can create a new connection to handle the request.
+            # 3. We can close an idle connection and then create a new connection
+            #    to handle the request.
+            if available_connections:
+                # log: "reusing existing connection"
+                connection = available_connections[0]
+                pool_request.assign_to_connection(connection)
+            elif (
+                len([c for c in self._connections if not c.is_idle()])
+                < self._max_connections
+            ):
+                # log: "creating new connection"
+                connection = self.create_connection(origin)
+                self._connections.append(connection)
+                pool_request.assign_to_connection(connection)
+            elif idle_connections:
+                # log: "closing idle connection"
+                connection = idle_connections[0]
+                self._connections.remove(connection)
+
+----
+
+[session A] note: The create-new-connection branch only counts connections that are not idle, so idle keepalive connections never count toward max_connections and the idle-eviction branch below it is never reached.
+
+----
+
+[session A] note: Idea: a shared admission counter in Redis so every process using the client shares one cap. The create branch would INCR before opening a connection and DECR on close.
+
+----
+
+[session A] note: Rejected the Redis counter. httpcore is a single-process client library, the cap is per pool, and a network service dependency is out of scope for a pool fix.
+
+----
+
+[session A] note: Decision: every connection the pool holds, idle keepalive ones included, counts toward max_connections. At the cap a request for a new origin has to reuse or evict an idle connection rather than exceed the cap.
+
+----
+
+[session A] $ sed -n 283,298p httpcore/_async/connection_pool.py
+        # have expired their keep-alive, or surplus idle connections.
+        for connection in list(self._connections):
+            if connection.is_closed():
+                # log: "removing closed connection"
+                self._connections.remove(connection)
+            elif connection.has_expired():
+                # log: "closing expired connection"
+                self._connections.remove(connection)
+                closing_connections.append(connection)
+            elif (
+                connection.is_idle()
+                and len([connection.is_idle() for connection in self._connections])
+                > self._max_keepalive_connections
+            ):
+                # log: "closing idle connection"
+                self._connections.remove(connection)
+
+----
+
+[session A] note: Also noticed: the keepalive cleanup loop uses len([connection.is_idle() for connection in self._connections]), which counts every connection, not only idle ones. Odd, but not this bug. Not touching keepalive cleanup or _max_keepalive_connections; out of scope.
+
+----
+
+[session A] note: Next step, not started: fix the create-new-connection branch in _assign_requests_to_connections in httpcore/_async/connection_pool.py, then regenerate the sync file with scripts/unasync.py and rerun the visible test.
+
+----
+
+[session B] note: Different problem today: a request to https://www.example.com:80/ goes out with Host: www.example.com instead of www.example.com:80. Finding where the Host header gets filled in.
+
+----
+
+[session B] $ grep -rn "b\"host\"\|b\"Host\"" httpcore/
+httpcore/_sync/http_proxy.py:280:                    [(b"Host", target), (b"Accept", b"*/*")], self._proxy_headers
+httpcore/_sync/http2.py:232:        authority = [v for k, v in request.headers if k.lower() == b"host"][0]
+httpcore/_sync/http2.py:244:                b"host",
+httpcore/_async/http_proxy.py:280:                    [(b"Host", target), (b"Accept", b"*/*")], self._proxy_headers
+httpcore/_async/http2.py:232:        authority = [v for k, v in request.headers if k.lower() == b"host"][0]
+httpcore/_async/http2.py:244:                b"host",
+httpcore/_models.py:117:    if b"host" not in headers_set:
+httpcore/_models.py:123:        headers = [(b"Host", header_value)] + headers
+
+----
+
+[session B] $ sed -n 1,141p httpcore/_models.py
+from __future__ import annotations
+
+import base64
+import ssl
+import typing
+import urllib.parse
+
+# Functions for typechecking...
+
+
+ByteOrStr = typing.Union[bytes, str]
+HeadersAsSequence = typing.Sequence[typing.Tuple[ByteOrStr, ByteOrStr]]
+HeadersAsMapping = typing.Mapping[ByteOrStr, ByteOrStr]
+HeaderTypes = typing.Union[HeadersAsSequence, HeadersAsMapping, None]
+
+Extensions = typing.MutableMapping[str, typing.Any]
+
+
+def enforce_bytes(value: bytes | str, *, name: str) -> bytes:
+    """
+    Any arguments that are ultimately represented as bytes can be specified
+    either as bytes or as strings.
+
+    However we enforce that any string arguments must only contain characters in
+    the plain ASCII range. chr(0)...chr(127). If you need to use characters
+    outside that range then be precise, and use a byte-wise argument.
+    """
+    if isinstance(value, str):
+        try:
+            return value.encode("ascii")
+        except UnicodeEncodeError:
+            raise TypeError(f"{name} strings may not include unicode characters.")
+    elif isinstance(value, bytes):
+        return value
+
+    seen_type = type(value).__name__
+    raise TypeError(f"{name} must be bytes or str, but got {seen_type}.")
+
+
+def enforce_url(value: URL | bytes | str, *, name: str) -> URL:
+    """
+    Type check for URL parameters.
+    """
+    if isinstance(value, (bytes, str)):
+        return URL(value)
+    elif isinstance(value, URL):
+        return value
+
+    seen_type = type(value).__name__
+    raise TypeError(f"{name} must be a URL, bytes, or str, but got {seen_type}.")
+
+
+def enforce_headers(
+    value: HeadersAsMapping | HeadersAsSequence | None = None, *, name: str
+) -> list[tuple[bytes, bytes]]:
+    """
+    Convienence function that ensure all items in request or response headers
+    are either bytes or strings in the plain ASCII range.
+    """
+    if value is None:
+        return []
+    elif isinstance(value, typing.Mapping):
+        return [
+            (
+                enforce_bytes(k, name="header name"),
+                enforce_bytes(v, name="header value"),
+            )
+            for k, v in value.items()
+        ]
+    elif isinstance(value, typing.Sequence):
+        return [
+            (
+                enforce_bytes(k, name="header name"),
+                enforce_bytes(v, name="header value"),
+            )
+            for k, v in value
+        ]
+
+    seen_type = type(value).__name__
+    raise TypeError(
+        f"{name} must be a mapping or sequence of two-tuples, but got {seen_type}."
+    )
+
+
+def enforce_stream(
+    value: bytes | typing.Iterable[bytes] | typing.AsyncIterable[bytes] | None,
+    *,
+    name: str,
+) -> typing.Iterable[bytes] | typing.AsyncIterable[bytes]:
+    if value is None:
+        return ByteStream(b"")
+    elif isinstance(value, bytes):
+        return ByteStream(value)
+    return value
+
+
+# * https://tools.ietf.org/html/rfc3986#section-3.2.3
+# * https://url.spec.whatwg.org/#url-miscellaneous
+# * https://url.spec.whatwg.org/#scheme-state
+DEFAULT_PORTS = {
+    b"ftp": 21,
+    b"http": 80,
+    b"https": 443,
+    b"ws": 80,
+    b"wss": 443,
+}
+
+
+def include_request_headers(
+    headers: list[tuple[bytes, bytes]],
+    *,
+    url: "URL",
+    content: None | bytes | typing.Iterable[bytes] | typing.AsyncIterable[bytes],
+) -> list[tuple[bytes, bytes]]:
+    headers_set = set(k.lower() for k, v in headers)
+
+    if b"host" not in headers_set:
+        default_port = DEFAULT_PORTS.get(url.scheme)
+        if url.port is None or url.port <= default_port:
+            header_value = url.host
+        else:
+            header_value = b"%b:%d" % (url.host, url.port)
+        headers = [(b"Host", header_value)] + headers
+
+    if (
+        content is not None
+        and b"content-length" not in headers_set
+        and b"transfer-encoding" not in headers_set
+    ):
+        if isinstance(content, bytes):
+            content_length = str(len(content)).encode("ascii")
+            headers += [(b"Content-Length", content_length)]
+        else:
+            headers += [(b"Transfer-Encoding", b"chunked")]  # pragma: nocover
+
+    return headers
+
+
+# Interfaces for byte streams...
+
+----
+
+[session B] note: include_request_headers adds Host when the caller did not set one. The port check is url.port <= default_port, so on https any port below 443 is treated as the default and dropped from the header. That should be ==.
+
+----
+
+[session B] $ python - <<'EOF'
+import httpcore
+from httpcore._models import include_request_headers
+
+for url in [
+    "https://www.example.com/",
+    "https://www.example.com:443/",
+    "https://www.example.com:80/",
+    "https://www.example.com:8443/",
+    "http://www.example.com:80/",
+    "http://www.example.com:8080/",
+]:
+    print(url, include_request_headers([], url=httpcore.URL(url), content=None))
+EOF
+https://www.example.com/ [(b'Host', b'www.example.com')]
+https://www.example.com:443/ [(b'Host', b'www.example.com')]
+https://www.example.com:80/ [(b'Host', b'www.example.com')]
+https://www.example.com:8443/ [(b'Host', b'www.example.com:8443')]
+http://www.example.com:80/ [(b'Host', b'www.example.com')]
+http://www.example.com:8080/ [(b'Host', b'www.example.com:8080')]
+
+----
+
+[session B] note: Confirmed: https on port 80 loses the port, 8443 keeps it. Checking how URL parses the port and the default ports table before changing anything.
+
+----
+
+[session B] $ sed -n 142,316p httpcore/_models.py
+class ByteStream:
+    """
+    A container for non-streaming content, and that supports both sync and async
+    stream iteration.
+    """
+
+    def __init__(self, content: bytes) -> None:
+        self._content = content
+
+    def __iter__(self) -> typing.Iterator[bytes]:
+        yield self._content
+
+    async def __aiter__(self) -> typing.AsyncIterator[bytes]:
+        yield self._content
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__} [{len(self._content)} bytes]>"
+
+
+class Origin:
+    def __init__(self, scheme: bytes, host: bytes, port: int) -> None:
+        self.scheme = scheme
+        self.host = host
+        self.port = port
+
+    def __eq__(self, other: typing.Any) -> bool:
+        return (
+            isinstance(other, Origin)
+            and self.scheme == other.scheme
+            and self.host == other.host
+            and self.port == other.port
+        )
+
+    def __str__(self) -> str:
+        scheme = self.scheme.decode("ascii")
+        host = self.host.decode("ascii")
+        port = str(self.port)
+        return f"{scheme}://{host}:{port}"
+
+
+class URL:
+    """
+    Represents the URL against which an HTTP request may be made.
+
+    The URL may either be specified as a plain string, for convienence:
+
+    ```python
+    url = httpcore.URL("https://www.example.com/")
+    ```
+
+    Or be constructed with explicitily pre-parsed components:
+
+    ```python
+    url = httpcore.URL(scheme=b'https', host=b'www.example.com', port=None, target=b'/')
+    ```
+
+    Using this second more explicit style allows integrations that are using
+    `httpcore` to pass through URLs that have already been parsed in order to use
+    libraries such as `rfc-3986` rather than relying on the stdlib. It also ensures
+    that URL parsing is treated identically at both the networking level and at any
+    higher layers of abstraction.
+
+    The four components are important here, as they allow the URL to be precisely
+    specified in a pre-parsed format. They also allow certain types of request to
+    be created that could not otherwise be expressed.
+
+    For example, an HTTP request to `http://www.example.com/` forwarded via a proxy
+    at `http://localhost:8080`...
+
+    ```python
+    # Constructs an HTTP request with a complete URL as the target:
+    # GET https://www.example.com/ HTTP/1.1
+    url = httpcore.URL(
+        scheme=b'http',
+        host=b'localhost',
+        port=8080,
+        target=b'https://www.example.com/'
+    )
+    request = httpcore.Request(
+        method="GET",
+        url=url
+    )
+    ```
+
+    Another example is constructing an `OPTIONS *` request...
+
+    ```python
+    # Constructs an 'OPTIONS *' HTTP request:
+    # OPTIONS * HTTP/1.1
+    url = httpcore.URL(scheme=b'https', host=b'www.example.com', target=b'*')
+    request = httpcore.Request(method="OPTIONS", url=url)
+    ```
+
+    This kind of request is not possible to formulate with a URL string,
+    because the `/` delimiter is always used to demark the target from the
+    host/port portion of the URL.
+
+    For convenience, string-like arguments may be specified either as strings or
+    as bytes. However, once a request is being issue over-the-wire, the URL
+    components are always ultimately required to be a bytewise representation.
+
+    In order to avoid any ambiguity over character encodings, when strings are used
+    as arguments, they must be strictly limited to the ASCII range `chr(0)`-`chr(127)`.
+    If you require a bytewise representation that is outside this range you must
+    handle the character encoding directly, and pass a bytes instance.
+    """
+
+    def __init__(
+        self,
+        url: bytes | str = "",
+        *,
+        scheme: bytes | str = b"",
+        host: bytes | str = b"",
+        port: int | None = None,
+        target: bytes | str = b"",
+    ) -> None:
+        """
+        Parameters:
+            url: The complete URL as a string or bytes.
+            scheme: The URL scheme as a string or bytes.
+                Typically either `"http"` or `"https"`.
+            host: The URL host as a string or bytes. Such as `"www.example.com"`.
+            port: The port to connect to. Either an integer or `None`.
+            target: The target of the HTTP request. Such as `"/items?search=red"`.
+        """
+        if url:
+            parsed = urllib.parse.urlparse(enforce_bytes(url, name="url"))
+            self.scheme = parsed.scheme
+            self.host = parsed.hostname or b""
+            self.port = parsed.port
+            self.target = (parsed.path or b"/") + (
+                b"?" + parsed.query if parsed.query else b""
+            )
+        else:
+            self.scheme = enforce_bytes(scheme, name="scheme")
+            self.host = enforce_bytes(host, name="host")
+            self.port = port
+            self.target = enforce_bytes(target, name="target")
+
+    @property
+    def origin(self) -> Origin:
+        default_port = {
+            b"http": 80,
+            b"https": 443,
+            b"ws": 80,
+            b"wss": 443,
+            b"socks5": 1080,
+            b"socks5h": 1080,
+        }[self.scheme]
+        return Origin(
+            scheme=self.scheme, host=self.host, port=self.port or default_port
+        )
+
+    def __eq__(self, other: typing.Any) -> bool:
+        return (
+            isinstance(other, URL)
+            and other.scheme == self.scheme
+            and other.host == self.host
+            and other.port == self.port
+            and other.target == self.target
+        )
+
+    def __bytes__(self) -> bytes:
+        if self.port is None:
+            return b"%b://%b%b" % (self.scheme, self.host, self.target)
+        return b"%b://%b:%d%b" % (self.scheme, self.host, self.port, self.target)
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(scheme={self.scheme!r}, "
+            f"host={self.host!r}, port={self.port!r}, target={self.target!r})"
+        )
+
+
+class Request:
+
+----
+
+[session B] note: URL.port stays None when no port is given, so None or equal-to-default is the right rule. Checking the HTTP/1.1 connection does not rewrite Host on its own when sending headers.
+
+----
+
+[session B] $ sed -n 76,237p httpcore/_sync/http11.py
+                self._expire_at = None
+            else:
+                raise ConnectionNotAvailable()
+
+        try:
+            kwargs = {"request": request}
+            try:
+                with Trace(
+                    "send_request_headers", logger, request, kwargs
+                ) as trace:
+                    self._send_request_headers(**kwargs)
+                with Trace("send_request_body", logger, request, kwargs) as trace:
+                    self._send_request_body(**kwargs)
+            except WriteError:
+                # If we get a write error while we're writing the request,
+                # then we supress this error and move on to attempting to
+                # read the response. Servers can sometimes close the request
+                # pre-emptively and then respond with a well formed HTTP
+                # error response.
+                pass
+
+            with Trace(
+                "receive_response_headers", logger, request, kwargs
+            ) as trace:
+                (
+                    http_version,
+                    status,
+                    reason_phrase,
+                    headers,
+                    trailing_data,
+                ) = self._receive_response_headers(**kwargs)
+                trace.return_value = (
+                    http_version,
+                    status,
+                    reason_phrase,
+                    headers,
+                )
+
+            network_stream = self._network_stream
+
+            # CONNECT or Upgrade request
+            if (status == 101) or (
+                (request.method == b"CONNECT") and (200 <= status < 300)
+            ):
+                network_stream = HTTP11UpgradeStream(network_stream, trailing_data)
+
+            return Response(
+                status=status,
+                headers=headers,
+                content=HTTP11ConnectionByteStream(self, request),
+                extensions={
+                    "http_version": http_version,
+                    "reason_phrase": reason_phrase,
+                    "network_stream": network_stream,
+                },
+            )
+        except BaseException as exc:
+            with ShieldCancellation():
+                with Trace("response_closed", logger, request) as trace:
+                    self._response_closed()
+            raise exc
+
+    # Sending the request...
+
+    def _send_request_headers(self, request: Request) -> None:
+        timeouts = request.extensions.get("timeout", {})
+        timeout = timeouts.get("write", None)
+
+        with map_exceptions({h11.LocalProtocolError: LocalProtocolError}):
+            event = h11.Request(
+                method=request.method,
+                target=request.url.target,
+                headers=request.headers,
+            )
+        self._send_event(event, timeout=timeout)
+
+    def _send_request_body(self, request: Request) -> None:
+        timeouts = request.extensions.get("timeout", {})
+        timeout = timeouts.get("write", None)
+
+        assert isinstance(request.stream, typing.Iterable)
+        for chunk in request.stream:
+            event = h11.Data(data=chunk)
+            self._send_event(event, timeout=timeout)
+
+        self._send_event(h11.EndOfMessage(), timeout=timeout)
+
+    def _send_event(self, event: h11.Event, timeout: float | None = None) -> None:
+        bytes_to_send = self._h11_state.send(event)
+        if bytes_to_send is not None:
+            self._network_stream.write(bytes_to_send, timeout=timeout)
+
+    # Receiving the response...
+
+    def _receive_response_headers(
+        self, request: Request
+    ) -> tuple[bytes, int, bytes, list[tuple[bytes, bytes]], bytes]:
+        timeouts = request.extensions.get("timeout", {})
+        timeout = timeouts.get("read", None)
+
+        while True:
+            event = self._receive_event(timeout=timeout)
+            if isinstance(event, h11.Response):
+                break
+            if (
+                isinstance(event, h11.InformationalResponse)
+                and event.status_code == 101
+            ):
+                break
+
+        http_version = b"HTTP/" + event.http_version
+
+        # h11 version 0.11+ supports a `raw_items` interface to get the
+        # raw header casing, rather than the enforced lowercase headers.
+        headers = event.headers.raw_items()
+
+        trailing_data, _ = self._h11_state.trailing_data
+
+        return http_version, event.status_code, event.reason, headers, trailing_data
+
+    def _receive_response_body(
+        self, request: Request
+    ) -> typing.Iterator[bytes]:
+        timeouts = request.extensions.get("timeout", {})
+        timeout = timeouts.get("read", None)
+
+        while True:
+            event = self._receive_event(timeout=timeout)
+            if isinstance(event, h11.Data):
+                yield bytes(event.data)
+            elif isinstance(event, (h11.EndOfMessage, h11.PAUSED)):
+                break
+
+    def _receive_event(
+        self, timeout: float | None = None
+    ) -> h11.Event | type[h11.PAUSED]:
+        while True:
+            with map_exceptions({h11.RemoteProtocolError: RemoteProtocolError}):
+                event = self._h11_state.next_event()
+
+            if event is h11.NEED_DATA:
+                data = self._network_stream.read(
+                    self.READ_NUM_BYTES, timeout=timeout
+                )
+
+                # If we feed this case through h11 we'll raise an exception like:
+                #
+                #     httpcore.RemoteProtocolError: can't handle event type
+                #     ConnectionClosed when role=SERVER and state=SEND_RESPONSE
+                #
+                # Which is accurate, but not very informative from an end-user
+                # perspective. Instead we handle this case distinctly and treat
+                # it as a ConnectError.
+                if data == b"" and self._h11_state.their_state == h11.SEND_RESPONSE:
+                    msg = "Server disconnected without sending a response."
+                    raise RemoteProtocolError(msg)
+
+                self._h11_state.receive_data(data)
+            else:
+                # mypy fails to narrow the type in the above if statement above
+                return event  # type: ignore[return-value]
+
+----
+
+[session B] $ sed -n 140,170p httpcore/_async/http11.py
+    async def _send_request_headers(self, request: Request) -> None:
+        timeouts = request.extensions.get("timeout", {})
+        timeout = timeouts.get("write", None)
+
+        with map_exceptions({h11.LocalProtocolError: LocalProtocolError}):
+            event = h11.Request(
+                method=request.method,
+                target=request.url.target,
+                headers=request.headers,
+            )
+        await self._send_event(event, timeout=timeout)
+
+    async def _send_request_body(self, request: Request) -> None:
+        timeouts = request.extensions.get("timeout", {})
+        timeout = timeouts.get("write", None)
+
+        assert isinstance(request.stream, typing.AsyncIterable)
+        async for chunk in request.stream:
+            event = h11.Data(data=chunk)
+            await self._send_event(event, timeout=timeout)
+
+        await self._send_event(h11.EndOfMessage(), timeout=timeout)
+
+    async def _send_event(self, event: h11.Event, timeout: float | None = None) -> None:
+        bytes_to_send = self._h11_state.send(event)
+        if bytes_to_send is not None:
+            await self._network_stream.write(bytes_to_send, timeout=timeout)
+
+    # Receiving the response...
+
+    async def _receive_response_headers(
+
+----
+
+[session B] note: Neither connection touches Host; they send request.headers as given. The fix stays in _models.py. Looking at the existing model tests for a place to add a case.
+
+----
+
+[session B] $ sed -n 1,100p tests/test_models.py
+import typing
+
+import pytest
+
+import httpcore
+
+# URL
+
+
+def test_url():
+    url = httpcore.URL("https://www.example.com/")
+    assert url == httpcore.URL(
+        scheme="https", host="www.example.com", port=None, target="/"
+    )
+    assert bytes(url) == b"https://www.example.com/"
+
+
+def test_url_with_port():
+    url = httpcore.URL("https://www.example.com:443/")
+    assert url == httpcore.URL(
+        scheme="https", host="www.example.com", port=443, target="/"
+    )
+    assert bytes(url) == b"https://www.example.com:443/"
+
+
+def test_url_with_invalid_argument():
+    with pytest.raises(TypeError) as exc_info:
+        httpcore.URL(123)  # type: ignore
+    assert str(exc_info.value) == "url must be bytes or str, but got int."
+
+
+def test_url_cannot_include_unicode_strings():
+    """
+    URLs instantiated with strings outside of the plain ASCII range are disallowed,
+    but the explicit style allows for these ambiguous cases to be precisely expressed.
+    """
+    with pytest.raises(TypeError) as exc_info:
+        httpcore.URL("https://www.example.com/☺")
+    assert str(exc_info.value) == "url strings may not include unicode characters."
+
+    httpcore.URL(scheme=b"https", host=b"www.example.com", target="/☺".encode("utf-8"))
+
+
+def test_url_origin_socks5():
+    url = httpcore.URL("socks5://127.0.0.1")
+    origin = url.origin
+    assert origin == httpcore.Origin(scheme=b"socks5", host=b"127.0.0.1", port=1080)
+    assert str(origin) == "socks5://127.0.0.1:1080"
+
+    url = httpcore.URL("socks5h://127.0.0.1")
+    origin = url.origin
+    assert origin == httpcore.Origin(scheme=b"socks5h", host=b"127.0.0.1", port=1080)
+    assert str(origin) == "socks5h://127.0.0.1:1080"
+
+
+# Request
+
+
+def test_request():
+    request = httpcore.Request("GET", "https://www.example.com/")
+    assert request.method == b"GET"
+    assert request.url == httpcore.URL("https://www.example.com/")
+    assert request.headers == []
+    assert request.extensions == {}
+    assert repr(request) == "<Request [b'GET']>"
+    assert (
+        repr(request.url)
+        == "URL(scheme=b'https', host=b'www.example.com', port=None, target=b'/')"
+    )
+    assert repr(request.stream) == "<ByteStream [0 bytes]>"
+
+
+def test_request_with_target_extension():
+    extensions = {"target": b"/another_path"}
+    request = httpcore.Request(
+        "GET", "https://www.example.com/path", extensions=extensions
+    )
+    assert request.url.target == b"/another_path"
+
+    extensions = {"target": b"/unescaped|path"}
+    request = httpcore.Request(
+        "GET", "https://www.example.com/path", extensions=extensions
+    )
+    assert request.url.target == b"/unescaped|path"
+
+
+def test_request_with_invalid_method():
+    with pytest.raises(TypeError) as exc_info:
+        httpcore.Request(123, "https://www.example.com/")  # type: ignore
+    assert str(exc_info.value) == "method must be bytes or str, but got int."
+
+
+def test_request_with_invalid_url():
+    with pytest.raises(TypeError) as exc_info:
+        httpcore.Request("GET", 123)  # type: ignore
+    assert str(exc_info.value) == "url must be a URL, bytes, or str, but got int."
+
+
+def test_request_with_invalid_headers():
+    with pytest.raises(TypeError) as exc_info:
+
+----
+
+[session B] $ sed -n 100,189p tests/test_models.py
+    with pytest.raises(TypeError) as exc_info:
+        httpcore.Request("GET", "https://www.example.com/", headers=123)  # type: ignore
+    assert (
+        str(exc_info.value)
+        == "headers must be a mapping or sequence of two-tuples, but got int."
+    )
+
+
+# Response
+
+
+def test_response():
+    response = httpcore.Response(200)
+    assert response.status == 200
+    assert response.headers == []
+    assert response.extensions == {}
+    assert repr(response) == "<Response [200]>"
+    assert repr(response.stream) == "<ByteStream [0 bytes]>"
+
+
+# Tests for reading and streaming sync byte streams...
+
+
+class ByteIterator:
+    def __init__(self, chunks: typing.List[bytes]) -> None:
+        self._chunks = chunks
+
+    def __iter__(self) -> typing.Iterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
+
+
+def test_response_sync_read():
+    stream = ByteIterator([b"Hello, ", b"world!"])
+    response = httpcore.Response(200, content=stream)
+    assert response.read() == b"Hello, world!"
+    assert response.content == b"Hello, world!"
+
+
+def test_response_sync_streaming():
+    stream = ByteIterator([b"Hello, ", b"world!"])
+    response = httpcore.Response(200, content=stream)
+    content = b"".join([chunk for chunk in response.iter_stream()])
+    assert content == b"Hello, world!"
+
+    # We streamed the response rather than reading it, so .content is not available.
+    with pytest.raises(RuntimeError):
+        response.content
+
+    # Once we've streamed the response, we can't access the stream again.
+    with pytest.raises(RuntimeError):
+        for _chunk in response.iter_stream():
+            pass  # pragma: nocover
+
+
+# Tests for reading and streaming async byte streams...
+
+
+class AsyncByteIterator:
+    def __init__(self, chunks: typing.List[bytes]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self) -> typing.AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
+
+
+@pytest.mark.trio
+async def test_response_async_read():
+    stream = AsyncByteIterator([b"Hello, ", b"world!"])
+    response = httpcore.Response(200, content=stream)
+    assert await response.aread() == b"Hello, world!"
+    assert response.content == b"Hello, world!"
+
+
+@pytest.mark.trio
+async def test_response_async_streaming():
+    stream = AsyncByteIterator([b"Hello, ", b"world!"])
+    response = httpcore.Response(200, content=stream)
+    content = b"".join([chunk async for chunk in response.aiter_stream()])
+    assert content == b"Hello, world!"
+
+    # We streamed the response rather than reading it, so .content is not available.
+    with pytest.raises(RuntimeError):
+        response.content
+
+    # Once we've streamed the response, we can't access the stream again.
+    with pytest.raises(RuntimeError):
+        async for chunk in response.aiter_stream():
+            pass  # pragma: nocover
+
+----
+
+[session B] $ git apply --verbose /tmp/session_b_fix.patch
+Checking patch httpcore/_models.py...
+Checking patch tests/test_models.py...
+Applied patch httpcore/_models.py cleanly.
+Applied patch tests/test_models.py cleanly.
+
+----
+
+[session B] $ git diff
+diff --git a/httpcore/_models.py b/httpcore/_models.py
+index 9bd80f5..8a65f13 100644
+--- a/httpcore/_models.py
++++ b/httpcore/_models.py
+@@ -116,7 +116,7 @@ def include_request_headers(
+
+     if b"host" not in headers_set:
+         default_port = DEFAULT_PORTS.get(url.scheme)
+-        if url.port is None or url.port <= default_port:
++        if url.port is None or url.port == default_port:
+             header_value = url.host
+         else:
+             header_value = b"%b:%d" % (url.host, url.port)
+diff --git a/tests/test_models.py b/tests/test_models.py
+index 7dd6e41..9d45ee4 100644
+--- a/tests/test_models.py
++++ b/tests/test_models.py
+@@ -3,6 +3,7 @@ import typing
+ import pytest
+
+ import httpcore
++from httpcore._models import include_request_headers
+
+ # URL
+
+@@ -84,6 +85,13 @@ def test_request_with_target_extension():
+     assert request.url.target == b"/unescaped|path"
+
+
++def test_request_host_header_with_non_default_port():
++    headers = include_request_headers(
++        [], url=httpcore.URL("https://www.example.com:80/"), content=None
++    )
++    assert headers == [(b"Host", b"www.example.com:80")]
++
++
+ def test_request_with_invalid_method():
+     with pytest.raises(TypeError) as exc_info:
+         httpcore.Request(123, "https://www.example.com/")  # type: ignore
+
+----
+
+[session B] $ python -m pytest -q -p no:cacheprovider tests/test_models.py
+................                                                         [100%]
+16 passed in 0.00s
+
+----
+
+[session B] $ python -m pytest -q -p no:cacheprovider tests/_sync/test_http11.py tests/_async/test_http11.py
+.......................................                                  [100%]
+39 passed in 0.00s
+
+----
+
+[session B] note: Host header fix done: == instead of <=, plus test_request_host_header_with_non_default_port. Model and HTTP/1.1 tests pass.

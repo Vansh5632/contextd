@@ -1,0 +1,881 @@
+{
+  "agents": [
+    "codex"
+  ],
+  "arms": {
+    "contextd": {
+      "constraint_violation_rate": 0.0,
+      "failure_tags": {
+        "placement": 5
+      },
+      "forbidden_rate": 0.0,
+      "ladder_observation_recall": 0.0,
+      "ladder_selection_recall": 0.0,
+      "n": 5,
+      "packet_required_recall": 0.0,
+      "packet_token_precision": 0.0,
+      "packet_unit_precision": 0.0,
+      "repeated_work_calls_mean": 0.0,
+      "solved_rate": 0.0,
+      "tokens_mean": 55177.6,
+      "ttf_mean_reached": null,
+      "ttf_median": null,
+      "ttf_reached": 0,
+      "unscored_tests": 0
+    },
+    "none": {
+      "constraint_violation_rate": 0.0,
+      "failure_tags": {
+        "behaviour": 1,
+        "ok": 4
+      },
+      "forbidden_rate": 0.0,
+      "n": 5,
+      "packet_required_recall": 0.0,
+      "packet_token_precision": null,
+      "packet_unit_precision": null,
+      "repeated_work_calls_mean": 0.2,
+      "solved_rate": 1.0,
+      "tokens_mean": 213327.0,
+      "ttf_mean_reached": 10.4,
+      "ttf_median": 10.0,
+      "ttf_reached": 5,
+      "unscored_tests": 0
+    }
+  },
+  "baseline_arms": {
+    "none": {
+      "constraint_violation_rate": 0.0,
+      "failure_tags": {
+        "ok": 5
+      },
+      "forbidden_rate": 0.0,
+      "n": 5,
+      "packet_required_recall": 0.0,
+      "packet_token_precision": null,
+      "packet_unit_precision": null,
+      "repeated_work_calls_mean": 0.0,
+      "solved_rate": 1.0,
+      "tokens_mean": 215815.4,
+      "ttf_mean_reached": 10.6,
+      "ttf_median": 10.0,
+      "ttf_reached": 5,
+      "unscored_tests": 0
+    },
+    "oracle": {
+      "constraint_violation_rate": 0.0,
+      "failure_tags": {
+        "ok": 5
+      },
+      "forbidden_rate": 0.0,
+      "n": 5,
+      "packet_required_recall": 1.0,
+      "packet_token_precision": 1.0,
+      "packet_unit_precision": 1.0,
+      "repeated_work_calls_mean": 0.0,
+      "solved_rate": 1.0,
+      "tokens_mean": 70495.4,
+      "ttf_mean_reached": 2.6,
+      "ttf_median": 2.0,
+      "ttf_reached": 5,
+      "unscored_tests": 0
+    },
+    "raw": {
+      "constraint_violation_rate": 0.0,
+      "failure_tags": {
+        "placement": 5
+      },
+      "forbidden_rate": 0.0,
+      "n": 5,
+      "packet_required_recall": 0.7142857142857143,
+      "packet_token_precision": 0.06599483839252795,
+      "packet_unit_precision": 0.28125,
+      "repeated_work_calls_mean": 0.0,
+      "solved_rate": 1.0,
+      "tokens_mean": 133621.0,
+      "ttf_mean_reached": 3.4,
+      "ttf_median": 3.0,
+      "ttf_reached": 5,
+      "unscored_tests": 0
+    },
+    "stale-only": {
+      "constraint_violation_rate": 0.2,
+      "failure_tags": {
+        "placement": 5
+      },
+      "forbidden_rate": 1.0,
+      "n": 5,
+      "packet_required_recall": 0.2857142857142857,
+      "packet_token_precision": 0.5647058823529412,
+      "packet_unit_precision": 0.6,
+      "repeated_work_calls_mean": 2.4,
+      "solved_rate": 0.2,
+      "tokens_mean": 646110.8,
+      "ttf_mean_reached": 3.2,
+      "ttf_median": 3.0,
+      "ttf_reached": 5,
+      "unscored_tests": 0
+    },
+    "summary": {
+      "constraint_violation_rate": 0.0,
+      "failure_tags": {
+        "placement": 5
+      },
+      "forbidden_rate": 0.0,
+      "n": 5,
+      "packet_required_recall": 0.14285714285714285,
+      "packet_token_precision": 0.8117647058823529,
+      "packet_unit_precision": 0.75,
+      "repeated_work_calls_mean": 0.2,
+      "solved_rate": 1.0,
+      "tokens_mean": 185530.0,
+      "ttf_mean_reached": 4.0,
+      "ttf_median": 3.0,
+      "ttf_reached": 5,
+      "unscored_tests": 0
+    }
+  },
+  "baseline_deltas": {
+    "oracle": {
+      "constraint_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "forbidden_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "frontier_reached": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "repeated_work_calls": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "reps": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "solved": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tokens": {
+        "ci95": [
+          -164893.8,
+          -120995.4
+        ],
+        "mean": -145320.0,
+        "n_pairs": 5,
+        "per_rep": [
+          -154239.0,
+          -98833.0,
+          -138413.0,
+          -161037.0,
+          -174078.0
+        ]
+      },
+      "ttf_both_reached": {
+        "ci95": [
+          -8.0,
+          -8.0
+        ],
+        "mean": -8.0,
+        "n_pairs": 5,
+        "per_rep": [
+          -8.0,
+          -8.0,
+          -8.0,
+          -8.0,
+          -8.0
+        ]
+      }
+    },
+    "raw": {
+      "constraint_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "forbidden_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "frontier_reached": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "repeated_work_calls": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "reps": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "solved": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tokens": {
+        "ci95": [
+          -104482.8,
+          -56829.8
+        ],
+        "mean": -82194.4,
+        "n_pairs": 5,
+        "per_rep": [
+          -96974.0,
+          -39956.0,
+          -61322.0,
+          -102959.0,
+          -109761.0
+        ]
+      },
+      "ttf_both_reached": {
+        "ci95": [
+          -8.2,
+          -6.2
+        ],
+        "mean": -7.2,
+        "n_pairs": 5,
+        "per_rep": [
+          -8.0,
+          -6.0,
+          -9.0,
+          -6.0,
+          -7.0
+        ]
+      }
+    },
+    "stale-only": {
+      "constraint_any": {
+        "ci95": [
+          0.0,
+          0.6
+        ],
+        "mean": 0.2,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "forbidden_any": {
+        "ci95": [
+          1.0,
+          1.0
+        ],
+        "mean": 1.0,
+        "n_pairs": 5,
+        "per_rep": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "frontier_reached": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "repeated_work_calls": {
+        "ci95": [
+          1.6,
+          3.4
+        ],
+        "mean": 2.4,
+        "n_pairs": 5,
+        "per_rep": [
+          2.0,
+          4.0,
+          3.0,
+          2.0,
+          1.0
+        ]
+      },
+      "reps": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "solved": {
+        "ci95": [
+          -1.0,
+          -0.4
+        ],
+        "mean": -0.8,
+        "n_pairs": 5,
+        "per_rep": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          0.0
+        ]
+      },
+      "tokens": {
+        "ci95": [
+          320310.6,
+          553477.2
+        ],
+        "mean": 430295.4,
+        "n_pairs": 5,
+        "per_rep": [
+          348572.0,
+          360645.0,
+          624218.0,
+          546160.0,
+          271882.0
+        ]
+      },
+      "ttf_both_reached": {
+        "ci95": [
+          -8.4,
+          -6.4
+        ],
+        "mean": -7.4,
+        "n_pairs": 5,
+        "per_rep": [
+          -8.0,
+          -6.0,
+          -9.0,
+          -8.0,
+          -6.0
+        ]
+      }
+    },
+    "summary": {
+      "constraint_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "forbidden_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "frontier_reached": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "repeated_work_calls": {
+        "ci95": [
+          0.0,
+          0.6
+        ],
+        "mean": 0.2,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "reps": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "solved": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tokens": {
+        "ci95": [
+          -65253.2,
+          4682.4
+        ],
+        "mean": -30285.4,
+        "n_pairs": 5,
+        "per_rep": [
+          -246.0,
+          7686.0,
+          4143.0,
+          -79991.0,
+          -83019.0
+        ]
+      },
+      "ttf_both_reached": {
+        "ci95": [
+          -8.4,
+          -4.8
+        ],
+        "mean": -6.6,
+        "n_pairs": 5,
+        "per_rep": [
+          -8.0,
+          -4.0,
+          -9.0,
+          -8.0,
+          -4.0
+        ]
+      }
+    }
+  },
+  "baseline_run": "live-v1",
+  "bootstrap": {
+    "resamples": 10000,
+    "seed": 20260930
+  },
+  "codex_version": "0.159.3",
+  "cross_run_deltas": {
+    "contextd": {
+      "constraint_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "forbidden_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "frontier_reached": {
+        "ci95": [
+          -1.0,
+          -1.0
+        ],
+        "mean": -1.0,
+        "n_pairs": 5,
+        "per_rep": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ]
+      },
+      "repeated_work_calls": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "reps": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "solved": {
+        "ci95": [
+          -1.0,
+          -1.0
+        ],
+        "mean": -1.0,
+        "n_pairs": 5,
+        "per_rep": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ]
+      },
+      "tokens": {
+        "ci95": [
+          -174259.4,
+          -143825.4
+        ],
+        "mean": -160637.8,
+        "n_pairs": 5,
+        "per_rep": [
+          -171239.0,
+          -127692.0,
+          -164812.0,
+          -159140.0,
+          -180306.0
+        ]
+      },
+      "ttf_both_reached": {
+        "ci95": null,
+        "mean": null,
+        "n_pairs": 0,
+        "per_rep": []
+      }
+    }
+  },
+  "deltas": {
+    "contextd": {
+      "constraint_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "forbidden_any": {
+        "ci95": [
+          0.0,
+          0.0
+        ],
+        "mean": 0.0,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "frontier_reached": {
+        "ci95": [
+          -1.0,
+          -1.0
+        ],
+        "mean": -1.0,
+        "n_pairs": 5,
+        "per_rep": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ]
+      },
+      "repeated_work_calls": {
+        "ci95": [
+          -0.6,
+          0.0
+        ],
+        "mean": -0.2,
+        "n_pairs": 5,
+        "per_rep": [
+          0.0,
+          -1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "reps": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "solved": {
+        "ci95": [
+          -1.0,
+          -1.0
+        ],
+        "mean": -1.0,
+        "n_pairs": 5,
+        "per_rep": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0
+        ]
+      },
+      "tokens": {
+        "ci95": [
+          -175357.4,
+          -141021.2
+        ],
+        "mean": -158149.4,
+        "n_pairs": 5,
+        "per_rep": [
+          -133189.0,
+          -190416.0,
+          -166785.0,
+          -161603.0,
+          -138754.0
+        ]
+      },
+      "ttf_both_reached": {
+        "ci95": null,
+        "mean": null,
+        "n_pairs": 0,
+        "per_rep": []
+      }
+    }
+  },
+  "g6": {
+    "detail": "G6: not applicable to this run",
+    "log": "",
+    "status": "not applicable"
+  },
+  "models": [
+    "gpt-6.1-sol"
+  ],
+  "n_trials": 10,
+  "predictions": {
+    "frozen_packet_sha256": "e44ea0cdb976e412b9e61d0a9620961b2632723110e53942f62efc167b9fcc95",
+    "results": [
+      {
+        "comparison": "contextd vs summary",
+        "direction": "lower",
+        "id": "recall_below_summary",
+        "left": 0.0,
+        "metric": "packet_required_recall",
+        "ok": true,
+        "right": 0.14285714285714285,
+        "where": "cross-run"
+      },
+      {
+        "comparison": "contextd vs oracle",
+        "direction": "higher",
+        "id": "slower_than_oracle",
+        "left": "not reached",
+        "metric": "ttf_median",
+        "ok": true,
+        "right": 2.0,
+        "where": "cross-run"
+      },
+      {
+        "comparison": "contextd vs raw",
+        "direction": "higher",
+        "id": "slower_than_raw",
+        "left": "not reached",
+        "metric": "ttf_median",
+        "ok": true,
+        "right": 3.0,
+        "where": "cross-run"
+      },
+      {
+        "comparison": "contextd vs oracle",
+        "direction": "higher",
+        "id": "costlier_than_oracle",
+        "left": 55177.6,
+        "metric": "tokens_mean",
+        "ok": false,
+        "right": 70495.4,
+        "where": "cross-run"
+      },
+      {
+        "comparison": "contextd vs stale-only",
+        "direction": "lower",
+        "id": "safer_than_stale",
+        "left": 0.0,
+        "metric": "forbidden_rate",
+        "ok": true,
+        "right": 1.0,
+        "where": "cross-run"
+      }
+    ]
+  },
+  "run": "live-v2-contextd"
+}

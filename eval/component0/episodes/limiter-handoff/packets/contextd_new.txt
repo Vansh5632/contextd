@@ -1,0 +1,29 @@
+{
+  "estimated_tokens": 236,
+  "focal_task": {
+    "id": "t_a58f76e3ca4078e8a849ed9682f450cc",
+    "next_action": {
+      "confidence": "inferred",
+      "evidence_ids": [
+        "01M3XNAR7H75PYWVJ26YTXHHXG"
+      ],
+      "id": "c_d2453f82cd2a9a8d691105ac9ba02993",
+      "origin": "projector",
+      "text": "Re-run and inspect: python -m pytest -q -p no:cacheprovider tests/test_pool_counts.py"
+    },
+    "reality": [
+      {
+        "confidence": "observed",
+        "evidence_ids": [
+          "01M3XNAR7H75PYWVJ26YTXHHXG"
+        ],
+        "id": "c_3b9e96b70d62de4da33656b0f9774e8a",
+        "origin": "projector",
+        "text": "python -m pytest -q -p no:cacheprovider tests/test_pool_counts.py exited 1"
+      }
+    ],
+    "status": "active"
+  },
+  "notice": "Claims are evidence. Verify the repo. observed > stated > inferred > hypothesis.",
+  "session_id": "01M6C7DMCTME8NRK9YNT3NYN88"
+}

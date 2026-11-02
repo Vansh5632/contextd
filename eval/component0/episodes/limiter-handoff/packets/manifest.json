@@ -1,0 +1,127 @@
+{
+  "episode": "limiter-handoff",
+  "history": {
+    "file": "history/history.jsonl",
+    "session_tokens": {
+      "A": 3746,
+      "B": 6643
+    },
+    "sha256": "6d059f7c611aacf64112d7e08ace2b01bccb16a0f4759e7542678231bce5b6ae",
+    "units": 42
+  },
+  "packets": {
+    "contextd": {
+      "file": "packets/contextd.txt",
+      "sha256": "e44ea0cdb976e412b9e61d0a9620961b2632723110e53942f62efc167b9fcc95",
+      "tokens": 1122
+    },
+    "contextd-new": {
+      "file": "packets/contextd_new.txt",
+      "sha256": "ace721e144a835ed7c6fc4278ac2c35dade22ade515411077147657177f8f2fe",
+      "tokens": 318
+    },
+    "none": {
+      "file": null,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tokens": 0
+    },
+    "oracle": {
+      "file": "packets/oracle.txt",
+      "sha256": "454494cb711710fc00b3a3e1faa6a0695dd3b8e4d2ea374ec08437a17e0edd7e",
+      "tokens": 381
+    },
+    "raw": {
+      "dropped_units": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "file": "packets/raw.txt",
+      "kept_units": [
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42
+      ],
+      "sha256": "c344ddfc8b3fb22d84e6c2e1ee65f91f283d0df8caae19a9f174993254e71410",
+      "tokens": 8175
+    },
+    "stale-only": {
+      "file": "packets/stale_only.txt",
+      "sha256": "61b9407919445f75c3c7065a9fb937fab4f828048c64b0d6bbe31767de81a538",
+      "tokens": 255
+    },
+    "summary": {
+      "file": "packets/summary.txt",
+      "sha256": "77ca282d1f79476a35afbe7510c36b0794ef7f000aedee00f8e851d7856537b4",
+      "tokens": 170
+    }
+  },
+  "prompts": {
+    "contextd": {
+      "sha256": "fbd67b59524f3464f16d5d3a757de971876556154135a7433b9a7246041e0532",
+      "tokens": 1138
+    },
+    "contextd-new": {
+      "sha256": "94d54986d7ac770b64c299acdb6caa0fb83181a78c2154ecfb76063ac5b058f8",
+      "tokens": 334
+    },
+    "none": {
+      "sha256": "cbda080ee4a0a36d38b089ccb344a00a0f3c9a132c8839c4b2210b9aa524213d",
+      "tokens": 8
+    },
+    "oracle": {
+      "sha256": "4e00eae44067c14592ad056727937dafd2e4224255b92357b5c309170aaa19ec",
+      "tokens": 397
+    },
+    "raw": {
+      "sha256": "ffb81126c8503acbbe25387369d5b893e10419fa06c737105fe1b4385525db94",
+      "tokens": 8191
+    },
+    "stale-only": {
+      "sha256": "607e56f1aa5121d0f3260a5114e0d032d866b81105b28b86e7b2eacf4c490c93",
+      "tokens": 271
+    },
+    "summary": {
+      "sha256": "f7d2ecb43367c18319f353a4f4a5964ec3e16c2426c4be7ded9be16029a9f075",
+      "tokens": 186
+    }
+  },
+  "raw_budget_tokens": 8192,
+  "tokenizer": "o200k_base"
+}

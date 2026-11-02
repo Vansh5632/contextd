@@ -1,0 +1,18 @@
+version: 1
+superseded_marker: '\brejected\b'
+atoms:
+  - id: idle_not_counted
+    role: required
+    claim: Idle connections are not counted toward the cap.
+    match:
+      - 'idle connections are not counted'
+  - id: idle_counts
+    role: required
+    claim: Idle connections count toward the cap.
+    match:
+      - 'idle connections count toward'
+  - id: no_deps
+    role: constraint
+    claim: No new dependencies.
+    match:
+      - 'no new dependencies'

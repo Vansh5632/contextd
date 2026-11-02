@@ -1,0 +1,9 @@
+Finding: the visible test tests/test_pool_counts.py fails with "count 3 diverged from 2". With max_connections=2, requests to three origins leave the pool holding three connections, so the cap is not enforced.
+
+Constraint: keep the public signatures and defaults of ConnectionPool.__init__ and AsyncConnectionPool.__init__ (max_connections=10, max_keepalive_connections=None, and the rest) and of handle_request / handle_async_request unchanged.
+
+Plan: enforce the cap with a shared admission counter in Redis so every process using the client sees one connection count. The pool increments the counter before opening a connection and decrements it when a connection closes; a request that finds the counter at max_connections waits for a slot.
+
+Unresolved, out of scope: the keepalive cleanup loop uses len([connection.is_idle() for connection in self._connections]), which counts every connection. Noticed and deliberately left alone; do not touch keepalive cleanup or _max_keepalive_connections.
+
+Next step: add the Redis counter client and call it from the create-new-connection branch in _assign_requests_to_connections in httpcore/_async/connection_pool.py, then regenerate httpcore/_sync/connection_pool.py with scripts/unasync.py and rerun the visible test.

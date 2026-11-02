@@ -1,0 +1,96 @@
+diff --git a/httpcore/_async/connection_pool.py b/httpcore/_async/connection_pool.py
+index e32f753..96e973d 100644
+--- a/httpcore/_async/connection_pool.py
++++ b/httpcore/_async/connection_pool.py
+@@ -321,10 +321,7 @@ class AsyncConnectionPool(AsyncRequestInterface):
+                 # log: "reusing existing connection"
+                 connection = available_connections[0]
+                 pool_request.assign_to_connection(connection)
+-            elif (
+-                len([c for c in self._connections if not c.is_idle()])
+-                < self._max_connections
+-            ):
++            elif len(self._connections) < self._max_connections:
+                 # log: "creating new connection"
+                 connection = self.create_connection(origin)
+                 self._connections.append(connection)
+diff --git a/httpcore/_sync/connection_pool.py b/httpcore/_sync/connection_pool.py
+index f9d4406..9ccfa53 100644
+--- a/httpcore/_sync/connection_pool.py
++++ b/httpcore/_sync/connection_pool.py
+@@ -321,10 +321,7 @@ class ConnectionPool(RequestInterface):
+                 # log: "reusing existing connection"
+                 connection = available_connections[0]
+                 pool_request.assign_to_connection(connection)
+-            elif (
+-                len([c for c in self._connections if not c.is_idle()])
+-                < self._max_connections
+-            ):
++            elif len(self._connections) < self._max_connections:
+                 # log: "creating new connection"
+                 connection = self.create_connection(origin)
+                 self._connections.append(connection)
+diff --git a/tests/_async/test_connection_pool.py b/tests/_async/test_connection_pool.py
+index 2711ec5..7d0675a 100644
+--- a/tests/_async/test_connection_pool.py
++++ b/tests/_async/test_connection_pool.py
+@@ -104,6 +104,27 @@ async def test_connection_pool_with_keepalive():
+         )
+ 
+ 
++@pytest.mark.anyio
++@pytest.mark.parametrize("max_connections", [1, 2])
++async def test_connection_pool_limit_with_idle_connections(max_connections):
++    network_backend = httpcore.AsyncMockBackend(
++        [b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello"]
++    )
++    async with httpcore.AsyncConnectionPool(
++        max_connections=max_connections, network_backend=network_backend
++    ) as pool:
++        for index in range(max_connections):
++            response = await pool.request("GET", f"https://{index}.example.com/")
++            assert response.content == b"Hello"
++
++        evicted_connection = pool.connections[0]
++        async with pool.stream("GET", "https://new.example.com/") as response:
++            assert len(pool.connections) == max_connections
++            assert evicted_connection not in pool.connections
++            assert evicted_connection.is_closed()
++            assert await response.aread() == b"Hello"
++
++
+ @pytest.mark.anyio
+ async def test_connection_pool_with_close():
+     """
+diff --git a/tests/_sync/test_connection_pool.py b/tests/_sync/test_connection_pool.py
+index 09f5a26..474259e 100644
+--- a/tests/_sync/test_connection_pool.py
++++ b/tests/_sync/test_connection_pool.py
+@@ -105,6 +105,27 @@ def test_connection_pool_with_keepalive():
+ 
+ 
+ 
++@pytest.mark.parametrize("max_connections", [1, 2])
++def test_connection_pool_limit_with_idle_connections(max_connections):
++    network_backend = httpcore.MockBackend(
++        [b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello"]
++    )
++    with httpcore.ConnectionPool(
++        max_connections=max_connections, network_backend=network_backend
++    ) as pool:
++        for index in range(max_connections):
++            response = pool.request("GET", f"https://{index}.example.com/")
++            assert response.content == b"Hello"
++
++        evicted_connection = pool.connections[0]
++        with pool.stream("GET", "https://new.example.com/") as response:
++            assert len(pool.connections) == max_connections
++            assert evicted_connection not in pool.connections
++            assert evicted_connection.is_closed()
++            assert response.read() == b"Hello"
++
++
++
+ def test_connection_pool_with_close():
+     """
+     HTTP/1.1 requests that include a 'Connection: Close' header should

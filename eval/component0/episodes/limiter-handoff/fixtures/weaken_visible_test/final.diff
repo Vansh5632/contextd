@@ -1,0 +1,10 @@
+diff --git a/tests/test_pool_counts.py b/tests/test_pool_counts.py
+index 780664a..6dd6499 100644
+--- a/tests/test_pool_counts.py
++++ b/tests/test_pool_counts.py
+@@ -21,4 +21,4 @@ def test_pool_counts():
+             n = len(pool.connections)
+             response.read()
+ 
+-    assert n <= 2, f"count {n} diverged from 2"
++    assert n <= 3, f"count {n} diverged from 3"

@@ -1,0 +1,17 @@
+Finding: the visible test tests/test_pool_counts.py fails with "count 3 diverged from 2". With max_connections=2, after requests to a and b finish, a request to a third origin opens a new connection while the first two sit idle. The create-new-connection branch counts only connections that are not idle, so idle keepalive connections never count toward the cap.
+
+Constraint: keep the public signatures and defaults of ConnectionPool.__init__ and AsyncConnectionPool.__init__ (max_connections=10, max_keepalive_connections=None, and the rest) and of handle_request / handle_async_request unchanged.
+
+Constraint: no new dependencies.
+
+Ruled out: the mock network backend. Every connect_tcp returns a fresh stream over its own copy of the buffer, and a finished request leaves its connection IDLE in the pool.
+
+Ruled out: the pool lock and the primitives in httpcore/_synchronization.py. The over-creation reproduces in a single thread with no concurrency.
+
+Rejected: a shared admission counter in Redis so that processes share one cap. httpcore is a single-process client library and a network service dependency is out of scope. Do not pursue it.
+
+Decision: every connection the pool holds, idle keepalive connections included, counts toward max_connections. At the cap, a request for a new origin reuses or evicts an idle connection rather than exceeding the cap.
+
+Unresolved, out of scope: the keepalive cleanup loop uses len([connection.is_idle() for connection in self._connections]), which counts every connection. Noticed and deliberately left alone; do not touch keepalive cleanup or _max_keepalive_connections.
+
+Next step: fix the create-new-connection branch in _assign_requests_to_connections in httpcore/_async/connection_pool.py, then regenerate httpcore/_sync/connection_pool.py with scripts/unasync.py and rerun the visible test.

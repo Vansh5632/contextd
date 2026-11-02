@@ -10,6 +10,7 @@
 
 use std::path::PathBuf;
 
+use contextd_core::claim::{ClaimConfidence, ClaimKind};
 use contextd_core::protocol::ContextRequest;
 use rmcp::{
     ErrorData, ServerHandler,
@@ -29,12 +30,14 @@ use serde::Deserialize;
 pub const SNAPSHOT_URI: &str = "context://snapshot/current";
 
 const INSTRUCTIONS: &str = "\
-contextd watches this machine locally and keeps one picture of what the developer is doing.
+contextd watches this machine locally and keeps one picture of the current task.
 
-Call `context_now` before asking the user what they are working on or which file they are in -- \
-the answer is usually already there. Use `search_context` for a specific past moment, \
-`recall_similar` when the current problem feels familiar, and `set_intent` when the user states \
-a goal so later briefings stay on track.";
+Call `context_now` before asking the user what they are working on -- it returns the \
+current claims for the focal task, not a recency feed. Use `search_context` for a specific \
+past moment, `recall_similar` when the current problem feels familiar, `set_intent` when \
+the user states a goal, and `note_claim` to record a finding, decision, ruled-out approach, \
+unknown, or next action. Claims are evidence: verify them against the repo. User-stated \
+constraints are written with `contextd claim`, not this tool.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct NowRequest {
@@ -59,6 +62,20 @@ pub struct IntentRequest {
     pub text: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct NoteClaimRequest {
+    /// One of: reality, decision, ruled_out, unknown, next_action.
+    pub kind: String,
+    /// The claim, in the agent's own words.
+    pub text: String,
+    /// inferred (default) or hypothesis. unknowns are stored as hypothesis.
+    #[serde(default)]
+    pub confidence: Option<String>,
+    /// Optional id of an earlier agent claim this one replaces.
+    #[serde(default)]
+    pub replaces: Option<String>,
+}
+
 /// Talks MCP on stdin/stdout, forwards everything to the daemon's socket.
 #[derive(Clone)]
 pub struct ContextdServer {
@@ -72,9 +89,9 @@ impl ContextdServer {
     }
 
     #[tool(
-        description = "What the developer is doing right now: recent activity, their declared \
-                       intent, and related history from earlier work. Call this before asking \
-                       the user for context."
+        description = "Current task state: the focal task, its constraints, verified facts, \
+                       decisions, ruled-out approaches, unknowns, and next action. Call this \
+                       before asking the user what they are working on."
     )]
     pub async fn context_now(
         &self,
@@ -114,6 +131,49 @@ impl ContextdServer {
         Parameters(IntentRequest { text }): Parameters<IntentRequest>,
     ) -> Result<CallToolResult, ErrorData> {
         self.forward(ContextRequest::Intent { text }).await
+    }
+
+    #[tool(
+        description = "Record an inferred claim about the current task: a finding (kind=reality), \
+                       a decision, a ruled-out approach, an unknown, or the next action. \
+                       Confidence is inferred or hypothesis. Cannot write constraints, intent, \
+                       or observed facts."
+    )]
+    pub async fn note_claim(
+        &self,
+        Parameters(NoteClaimRequest {
+            kind,
+            text,
+            confidence,
+            replaces,
+        }): Parameters<NoteClaimRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let kind = match ClaimKind::parse(&kind) {
+            Some(kind) => kind,
+            None => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(
+                    "kind must be one of: reality, decision, ruled_out, unknown, next_action",
+                )]));
+            }
+        };
+        let confidence = match confidence.as_deref() {
+            None => None,
+            Some(value) => match ClaimConfidence::parse(value) {
+                Some(parsed) => Some(parsed),
+                None => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(
+                        "confidence must be inferred or hypothesis",
+                    )]));
+                }
+            },
+        };
+        self.forward(ContextRequest::AgentClaim {
+            kind,
+            text,
+            confidence,
+            replaces,
+        })
+        .await
     }
 
     /// One request, one reply, one piece of text content.
@@ -205,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn exposes_all_four_tools() {
+    fn exposes_all_five_tools() {
         let names: Vec<String> = ContextdServer::tool_router()
             .list_all()
             .into_iter()
@@ -217,6 +277,7 @@ mod tests {
             "search_context",
             "recall_similar",
             "set_intent",
+            "note_claim",
         ] {
             assert!(names.contains(&expected.to_string()), "missing {expected}");
         }

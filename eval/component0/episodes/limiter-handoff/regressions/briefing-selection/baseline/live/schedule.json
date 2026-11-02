@@ -1,0 +1,72 @@
+{
+  "agent": "codex",
+  "arms": [
+    "none",
+    "contextd"
+  ],
+  "reps": 5,
+  "schema": 1,
+  "seed": 20260930,
+  "trials": [
+    {
+      "arm": "none",
+      "dir": "none-r1",
+      "index": 0,
+      "rep": 1
+    },
+    {
+      "arm": "contextd",
+      "dir": "contextd-r1",
+      "index": 1,
+      "rep": 1
+    },
+    {
+      "arm": "none",
+      "dir": "none-r2",
+      "index": 2,
+      "rep": 2
+    },
+    {
+      "arm": "contextd",
+      "dir": "contextd-r2",
+      "index": 3,
+      "rep": 2
+    },
+    {
+      "arm": "contextd",
+      "dir": "contextd-r3",
+      "index": 4,
+      "rep": 3
+    },
+    {
+      "arm": "none",
+      "dir": "none-r3",
+      "index": 5,
+      "rep": 3
+    },
+    {
+      "arm": "none",
+      "dir": "none-r4",
+      "index": 6,
+      "rep": 4
+    },
+    {
+      "arm": "contextd",
+      "dir": "contextd-r4",
+      "index": 7,
+      "rep": 4
+    },
+    {
+      "arm": "none",
+      "dir": "none-r5",
+      "index": 8,
+      "rep": 5
+    },
+    {
+      "arm": "contextd",
+      "dir": "contextd-r5",
+      "index": 9,
+      "rep": 5
+    }
+  ]
+}

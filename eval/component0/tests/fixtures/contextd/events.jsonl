@@ -1,0 +1,2 @@
+{"id": "e1", "timestamp_ms": 20, "source": "shell", "payload": {"cmd": "idle connections are not counted toward the cap"}, "summary": "pool opens a third connection", "score": 0.8}
+{"id": "e2", "timestamp_ms": 30, "source": "editor", "payload": {"path": "httpcore/_async/connection_pool.py"}, "summary": "no new dependencies", "score": 0.4}

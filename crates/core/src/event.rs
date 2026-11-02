@@ -10,6 +10,7 @@ pub enum EventSource {
     Editor,
     Proc,
     Manifest,
+    Claim,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +90,7 @@ mod tests {
             (EventSource::Editor, "\"editor\""),
             (EventSource::Proc, "\"proc\""),
             (EventSource::Manifest, "\"manifest\""),
+            (EventSource::Claim, "\"claim\""),
         ];
 
         for (source, expected) in cases {

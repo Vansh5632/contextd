@@ -204,6 +204,9 @@ pub fn parse_inbound_line(line: &str) -> Result<InboundLine> {
 
     let incoming: IncomingEvent =
         serde_json::from_value(value).context("failed to deserialize raw event")?;
+    if incoming.source == contextd_core::event::EventSource::Claim {
+        anyhow::bail!("claim events cannot be ingested over the socket");
+    }
     Ok(InboundLine::Event(incoming.into()))
 }
 
@@ -357,6 +360,18 @@ mod tests {
     fn an_event_without_a_source_is_still_an_error() {
         // Everything else can be inferred; what kind of event it is cannot.
         assert!(parse_inbound_line(r#"{"payload":{"command":"ls"}}"#).is_err());
+    }
+
+    #[test]
+    fn claim_events_cannot_be_ingested_over_the_socket() {
+        let err = parse_inbound_line(
+            r#"{"source":"claim","payload":{"op":"assert","claim_id":"c_x","task_id":"t_x","origin":"user"}}"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("claim events cannot be ingested"),
+            "unhelpful error: {err}"
+        );
     }
 
     #[tokio::test]

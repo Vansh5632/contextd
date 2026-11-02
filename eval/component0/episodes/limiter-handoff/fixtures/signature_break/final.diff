@@ -1,0 +1,64 @@
+diff --git a/httpcore/_async/connection_pool.py b/httpcore/_async/connection_pool.py
+index e32f753..53274b2 100644
+--- a/httpcore/_async/connection_pool.py
++++ b/httpcore/_async/connection_pool.py
+@@ -59,6 +59,7 @@ class AsyncConnectionPool(AsyncRequestInterface):
+         uds: str | None = None,
+         network_backend: AsyncNetworkBackend | None = None,
+         socket_options: typing.Iterable[SOCKET_OPTION] | None = None,
++        max_idle_connections: int | None = None,
+     ) -> None:
+         """
+         A connection pool for making HTTP requests.
+@@ -109,6 +110,7 @@ class AsyncConnectionPool(AsyncRequestInterface):
+         self._retries = retries
+         self._local_address = local_address
+         self._uds = uds
++        self._max_idle_connections = max_idle_connections
+ 
+         self._network_backend = (
+             AutoBackend() if network_backend is None else network_backend
+@@ -321,10 +323,7 @@ class AsyncConnectionPool(AsyncRequestInterface):
+                 # log: "reusing existing connection"
+                 connection = available_connections[0]
+                 pool_request.assign_to_connection(connection)
+-            elif (
+-                len([c for c in self._connections if not c.is_idle()])
+-                < self._max_connections
+-            ):
++            elif len(self._connections) < self._max_connections:
+                 # log: "creating new connection"
+                 connection = self.create_connection(origin)
+                 self._connections.append(connection)
+diff --git a/httpcore/_sync/connection_pool.py b/httpcore/_sync/connection_pool.py
+index f9d4406..169f2d3 100644
+--- a/httpcore/_sync/connection_pool.py
++++ b/httpcore/_sync/connection_pool.py
+@@ -59,6 +59,7 @@ class ConnectionPool(RequestInterface):
+         uds: str | None = None,
+         network_backend: NetworkBackend | None = None,
+         socket_options: typing.Iterable[SOCKET_OPTION] | None = None,
++        max_idle_connections: int | None = None,
+     ) -> None:
+         """
+         A connection pool for making HTTP requests.
+@@ -109,6 +110,7 @@ class ConnectionPool(RequestInterface):
+         self._retries = retries
+         self._local_address = local_address
+         self._uds = uds
++        self._max_idle_connections = max_idle_connections
+ 
+         self._network_backend = (
+             SyncBackend() if network_backend is None else network_backend
+@@ -321,10 +323,7 @@ class ConnectionPool(RequestInterface):
+                 # log: "reusing existing connection"
+                 connection = available_connections[0]
+                 pool_request.assign_to_connection(connection)
+-            elif (
+-                len([c for c in self._connections if not c.is_idle()])
+-                < self._max_connections
+-            ):
++            elif len(self._connections) < self._max_connections:
+                 # log: "creating new connection"
+                 connection = self.create_connection(origin)
+                 self._connections.append(connection)

@@ -1,0 +1,51 @@
+[repo]
+url = "https://github.com/encode/httpcore.git"
+sha = "98209758cc14e1a5f966fe1dfdc1064b94055d8c"
+tag = "1.0.9"
+
+[git]
+author_name = "dev"
+author_email = "dev@example.invalid"
+default_branch = "main"
+import_message = "import"
+import_date = "2026-09-14T10:12:00+00:00"
+followup_message = "models: fix default port check in host header"
+followup_date = "2026-09-15T16:41:00+00:00"
+
+# Relative to eval/component0.
+[paths]
+cache = "build/cache/httpcore.git"
+workspace_root = "build/workspace"
+
+# Relative to the episode directory. Plant patches are applied in order before
+# the import commit; the followup patch becomes the second commit.
+[episode]
+name = "limiter-handoff"
+plant_patches = [
+    "patches/bug.patch",
+    "patches/remove_covering_test.patch",
+    "patches/session_b_bug.patch",
+]
+followup_patch = "patches/session_b_fix.patch"
+visible_test = "visible/test_pool_counts.py"
+visible_test_dest = "tests/test_pool_counts.py"
+fix_patch = "gold/fix.patch"
+hidden_tests = "gold/hidden_tests"
+leak_terms = "gold/leak_terms.yaml"
+
+# Context-packet arms (harness.arms). Token counts use the tiktoken encoding below.
+[arms]
+names = ["none", "raw", "summary", "oracle", "stale-only", "contextd", "contextd-new"]
+raw_budget_tokens = 8192
+tokenizer = "o200k_base"
+
+[freeze]
+history_jsonl = "6d059f7c611aacf64112d7e08ace2b01bccb16a0f4759e7542678231bce5b6ae"
+raw_txt = "c344ddfc8b3fb22d84e6c2e1ee65f91f283d0df8caae19a9f174993254e71410"
+summary_txt = "77ca282d1f79476a35afbe7510c36b0794ef7f000aedee00f8e851d7856537b4"
+oracle_txt = "454494cb711710fc00b3a3e1faa6a0695dd3b8e4d2ea374ec08437a17e0edd7e"
+stale_only_txt = "61b9407919445f75c3c7065a9fb937fab4f828048c64b0d6bbe31767de81a538"
+atoms_yaml = "eaddbc4db607941b2fea3473aa32e796b4ba9b0803030719fb1805bbd8101190"
+prompt_txt = "cbda080ee4a0a36d38b089ccb344a00a0f3c9a132c8839c4b2210b9aa524213d"
+wrapper_txt = "587d8c5e21ddb4919bd59300f5e4792afee5b3f2809cacb427ce651cfa3e1bdf"
+contextd_txt = "e44ea0cdb976e412b9e61d0a9620961b2632723110e53942f62efc167b9fcc95"

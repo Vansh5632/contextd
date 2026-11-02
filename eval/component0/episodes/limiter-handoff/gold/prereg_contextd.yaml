@@ -1,0 +1,48 @@
+# Predictions recorded before the contextd live run. Leave `predictions` empty and
+# `frozen_packet_sha256` null until the frozen packet has been inspected.
+# report.py evaluates these only when frozen_packet_sha256 is non-null and equals
+# pins.toml [freeze].contextd_txt; otherwise it prints `predictions: not registered`.
+#
+# Each prediction:
+#   id: stable name
+#   metric: arm-summary field (solved_rate, packet_required_recall, ...)
+#   comparison: "<arm> vs <arm>" (for example "contextd vs none", "contextd vs summary")
+#   direction: higher | lower
+#   rationale: why this was predicted from the frozen packet
+frozen_packet_sha256: e44ea0cdb976e412b9e61d0a9620961b2632723110e53942f62efc167b9fcc95
+predictions:
+  - id: recall_below_summary
+    metric: packet_required_recall
+    comparison: contextd vs summary
+    direction: lower
+    rationale: >-
+      The ladder shows 0 of 7 recall atoms stored or selected; Session A facts were notes
+      and command output, which contextd does not capture. Summary keeps 1 of 7.
+  - id: slower_than_oracle
+    metric: ttf_median
+    comparison: contextd vs oracle
+    direction: higher
+    rationale: >-
+      The briefing's 10 recent items are all Session B (host header fix and its commit);
+      only one relevant_history item touches connection_pool.py, with no finding or next step.
+  - id: slower_than_raw
+    metric: ttf_median
+    comparison: contextd vs raw
+    direction: higher
+    rationale: >-
+      Raw history keeps Session A's lock/Redis/decision notes and the next step; the
+      contextd briefing keeps none of them.
+  - id: costlier_than_oracle
+    metric: tokens_mean
+    comparison: contextd vs oracle
+    direction: higher
+    rationale: >-
+      Without the decision and next step the agent has to rediscover the bug, as the none
+      arm does (216k vs 70k tokens in live-v1).
+  - id: safer_than_stale
+    metric: forbidden_rate
+    comparison: contextd vs stale-only
+    direction: lower
+    rationale: >-
+      The briefing contains no Redis plan or other stale instruction, so nothing points the
+      agent at forbidden actions.

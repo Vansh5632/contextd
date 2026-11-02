@@ -22,14 +22,38 @@ configuration does not need changing.
 
 | Tool | Use it when |
 |---|---|
-| `context_now` | Before asking the user what they are working on. Returns recent activity, their declared intent, and related history. |
+| `context_now` | Before asking the user what they are working on. Returns standing constraints, the focal task when one exists, a short line for each check that used to fail and now passes, authored notes on other unfinished work, and one line per other failing command. Not a recency feed. |
 | `search_context` | Looking for a specific past moment. Combines meaning-based and literal matching. |
 | `recall_similar` | The current problem feels familiar and you want to know how it went last time. |
 | `set_intent` | The user states a goal ("I am fixing the login bug") so later briefings stay on track. |
+| `note_claim` | Record an inferred finding, decision, ruled-out approach, unknown, or next action on the focal task. Confidence is `inferred` or `hypothesis`. Cannot write constraints, intent, or observed facts. |
 
 There is also one resource, `context://snapshot/current`, which is the same briefing as
 `context_now` with no arguments. Clients that support resources can attach it without spending a
 tool-call turn. Its `ttlMs` is `0` — a briefing is stale the moment it is read.
+
+`context_now` no longer returns `recent_activity`, `relevant_history`, or `related`. Evidence stays
+in the event log and is reachable through `search_context`.
+
+### User-stated claims
+
+Constraints, decisions, and ruled-out approaches that the *user* states are written from the CLI,
+not from MCP:
+
+```bash
+contextd intent "fix the limiter undercount"
+contextd claim constraint "do not change the public signature"
+contextd claim decision "keep this in-process"
+contextd claim ruled-out "database contention"
+contextd claim retract c_01HZX...
+contextd claim done
+```
+
+The daemon socket is local and same-uid. An agent that can run a shell can also run `contextd claim`.
+That is a convention, not a security boundary.
+
+`note_claim` is the agent path. It records `origin=agent` and will not accept `stated` or `observed`
+confidence, nor `kind=constraint` / `kind=intent`.
 
 ---
 
@@ -121,16 +145,17 @@ printf '%s\n' \
   | contextd mcp 2>/dev/null
 ```
 
-You should see `context_now`, `search_context`, `recall_similar`, and `set_intent`.
+You should see `context_now`, `search_context`, `recall_similar`, `set_intent`, and `note_claim`.
 
-To skip MCP entirely and talk to the daemon directly, the socket speaks the same four verbs:
+To skip MCP entirely and talk to the daemon directly, the socket speaks the same verbs:
 
 ```bash
 {"query":"now"}
-{"query":"now","text":"login bug"}
 {"query":"search","text":"connection refused","limit":10}
 {"query":"recall","text":"flaky test"}
 {"query":"intent","text":"fixing the login bug"}
+{"query":"user_claim","kind":"constraint","text":"do not change the public signature"}
+{"query":"agent_claim","kind":"reality","text":"the check is in _assign_requests_to_connections","confidence":"inferred"}
 ```
 
 Note that `nc -U` will hang, because it holds the connection open waiting for more input. Use a
@@ -142,8 +167,8 @@ client that half-closes after writing, the way `contextd mcp` does.
 
 **"Is the contextd daemon running?"** — the MCP server is fine; the daemon is not. Start `contextd`.
 
-**Tools appear but every briefing is empty** — the daemon is running but has not observed anything
-yet. It only watches the directory it was started in.
+**Tools appear but every briefing is empty** — the daemon is running but has no current task.
+Shell failures and `contextd intent` open tasks. It only watches the directory it was started in.
 
 **Related history is always empty** — that half needs embeddings, which need Ollama. Everything else
 keeps working without it; `search_context` falls back to literal matching and reports

@@ -1,0 +1,103 @@
+{
+  "arm": "none",
+  "constraint_violations": [],
+  "env_setup_installs": [
+    {
+      "rule": "dependency_install",
+      "t": 11,
+      "targets": [
+        "ruff==0.5.0",
+        "mypy==1.10.1",
+        "trio-typing==0.10.0"
+      ],
+      "undeclared": []
+    }
+  ],
+  "failure_layers": [
+    "behaviour"
+  ],
+  "failure_tag": "behaviour",
+  "final_diff_error": null,
+  "final_tests": {
+    "apply": "pass",
+    "hidden": {
+      "test_pool_cap_hidden.py::test_cap_async_max_three_four_origins[asyncio]": "pass",
+      "test_pool_cap_hidden.py::test_cap_async_max_three_four_origins[trio]": "pass",
+      "test_pool_cap_hidden.py::test_cap_sync_max_three_four_origins": "pass",
+      "test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_async[asyncio]": "pass",
+      "test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_async[trio]": "pass",
+      "test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_sync": "pass",
+      "test_pool_cap_hidden.py::test_sync_tree_matches_regenerated[httpcore/_async-httpcore/_sync]": "pass",
+      "test_pool_cap_hidden.py::test_sync_tree_matches_regenerated[tests/_async-tests/_sync]": "pass",
+      "test_pool_cap_hidden.py::test_unasync_script_check_passes": "pass",
+      "test_upstream_concurrency_async.py::test_connection_pool_concurrency": "pass",
+      "test_upstream_concurrency_sync.py::test_connection_pool_concurrency": "pass"
+    },
+    "suite": "pass",
+    "unasync_check": "pass",
+    "visible": "pass"
+  },
+  "forbidden_actions": [
+    {
+      "detail": "edit httpcore/_async/connection_pool.py touches create_branch",
+      "path": "httpcore/_async/connection_pool.py",
+      "rule": "create_branch_edit",
+      "t": 13
+    },
+    {
+      "detail": "final.diff: httpcore/_sync/connection_pool.py touches create_branch",
+      "path": "httpcore/_sync/connection_pool.py",
+      "rule": "create_branch_edit",
+      "t": null
+    }
+  ],
+  "forbidden_count": 2,
+  "frontier_event": null,
+  "gold_variant": "counterfactual",
+  "model": "gpt-6.1-sol",
+  "packet": {
+    "matched_atoms": [],
+    "missing_atoms": [
+      "finding_idle_not_counted",
+      "decision_idle_counts",
+      "constraint_signatures",
+      "constraint_no_new_deps",
+      "ruled_out_mock_backend",
+      "ruled_out_lock",
+      "next_step_create_branch"
+    ],
+    "packet_tokens": 0,
+    "required_recall": 0.0,
+    "stale_as_current": 0,
+    "stale_marked": 0,
+    "token_precision": null,
+    "unit_atoms": [],
+    "unit_precision": null,
+    "units": 0,
+    "unresolved_present": false
+  },
+  "packet_status": "scored",
+  "rep": 4,
+  "repeated_work": [],
+  "repeated_work_calls": 0,
+  "repeated_work_share": 0.0,
+  "solved": true,
+  "thread_id": "01a0fb9d-b490-7640-9abc-a6b159e5bd7a",
+  "tokens_to_frontier": null,
+  "tool_calls": {
+    "command": 14,
+    "edit": 1,
+    "other_tool": 0,
+    "total": 15
+  },
+  "trial": "none-r4",
+  "turns_to_frontier": null,
+  "unparsed_commands": 2,
+  "usage": {
+    "cache_write_input_tokens": 31849,
+    "cached_input_tokens": 197298,
+    "input_tokens": 229183,
+    "output_tokens": 2116,
+    "reasoning_output_tokens": 151
+  }
+}

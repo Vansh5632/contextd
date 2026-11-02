@@ -1,0 +1,7 @@
+The main task is a connection pool that opens more connections than max_connections allows. The visible test, tests/test_pool_counts.py, fails because a pool created with max_connections=2 ends up holding three connections by the time the third request is streaming.
+
+Some investigation has been done. The mock network backend used by the test was checked and looked fine, so the problem seems to be in the pool itself rather than in the test setup.
+
+In a separate session, a Host header bug in httpcore/_models.py was fixed: the default-port check now uses == instead of <=, and a test for a non-default port was added. The model and HTTP/1.1 tests pass.
+
+The pool issue is still open. A reasonable next step is to look at how the pool assigns requests to connections and work out why it goes over the limit.
