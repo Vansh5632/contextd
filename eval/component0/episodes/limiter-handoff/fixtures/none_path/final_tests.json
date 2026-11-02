@@ -1,0 +1,13 @@
+{
+  "visible": "pass",
+  "hidden": {
+    "tests/test_pool_cap_hidden.py::test_cap_sync_max_three_four_origins": "pass",
+    "tests/test_pool_cap_hidden.py::test_cap_async_max_three_four_origins": "pass",
+    "tests/test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_sync": "pass",
+    "tests/test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_async": "pass",
+    "tests/test_pool_cap_hidden.py::test_unasync_script_check_passes": "pass",
+    "tests/test_upstream_concurrency_sync.py::test_connection_pool_concurrency": "pass",
+    "tests/test_upstream_concurrency_async.py::test_connection_pool_concurrency": "pass"
+  },
+  "suite": "pass"
+}

@@ -48,6 +48,7 @@ pub fn summarize(event: &RawEvent) -> Option<String> {
         EventSource::Git => summarize_git(event),
         EventSource::Manifest => summarize_manifest(event),
         EventSource::Editor => None,
+        EventSource::Claim => None,
     }?;
 
     let summary = collapse_whitespace(&summary);

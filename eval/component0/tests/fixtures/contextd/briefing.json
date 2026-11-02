@@ -1,0 +1,30 @@
+{
+  "intent": {"text": "finish the pool cap", "declared_at_ms": 100},
+  "session_id": "sess-1",
+  "recent_activity": [
+    {
+      "id": "e1",
+      "timestamp_ms": 20,
+      "source": "shell",
+      "text": "idle connections count toward the cap",
+      "relevance": 0.91,
+      "use_case": "fix",
+      "memory_type": "working"
+    }
+  ],
+  "relevant_history": [
+    {
+      "id": "h1",
+      "timestamp_ms": 5,
+      "source": "note",
+      "text": "earlier note about the pool",
+      "relevance": 0.2
+    }
+  ],
+  "related": [
+    {"kind": "symbol", "name": "ConnectionPool", "strength": 0.4}
+  ],
+  "archived": {"event_count": 3, "oldest_ms": 1, "digest": "old sessions digested"},
+  "truncated": false,
+  "estimated_tokens": 40
+}

@@ -1,0 +1,125 @@
+id: briefing-selection
+episode: limiter-handoff
+recorded: "2026-10-02"
+status: open
+diagnosis: docs/briefing-selection-failure.md
+summary: >-
+  Session A's failing visible-test run is stored with exit_code 1 and summarized "exited 1",
+  but context_now leaves it out of the briefing, so agents resume from Session B's finished commit.
+query: '{"query":"now"}'
+contextd:
+  head: f6ec62a089cffdf744f151b479226537061eaf84
+  diff_sha256: 7f7efe924497c40c05a85d11181d25b3dadb306d030ddf942ad7cae1818e6d2c
+  binary_sha256: 16e0db749736fb1c4fc6985ce9bf77adc55b49cb068cc8dc9de841c1f3a0df56
+  replay_image_id: sha256:6dd6ed88d4d699d5a78fb12643ac675a99ac7db942799b4bbc7b58ada6fda826
+  ollama_image_id: sha256:2a6e883b917fc543389599dae79918f5cac9e1438890506982f44aa4f5625d01
+  model_digest: sha256:0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f
+target:
+  source: shell
+  command_regex: 'pytest\b.*tests/test_pool_counts\.py'
+  exit_code_nonzero: true
+checks:
+- stored
+- selected
+- marked_failed
+baseline_expect:
+  stored: true
+  selected: false
+  marked_failed: false
+packet:
+  file: episodes/limiter-handoff/packets/contextd.txt
+  sha256: e44ea0cdb976e412b9e61d0a9620961b2632723110e53942f62efc167b9fcc95
+  same_as: baseline/replay/gen-1/briefing.reply
+live:
+  run: live-v2-contextd
+  model: gpt-6.1-sol
+  arms:
+    contextd:
+      n: 5
+      solved_rate: 0.0
+      ttf_reached: 0
+      ttf_median: null
+      tokens_mean: 55177.6
+    none:
+      n: 5
+      solved_rate: 1.0
+      ttf_reached: 5
+      ttf_median: 10.0
+      tokens_mean: 213327.0
+files:
+  baseline/live/contextd-r1/exec.jsonl: b8b65be1b7487498da38bb614ee9ced165bc92e41cf0e5c572a4dd304211b184
+  baseline/live/contextd-r1/final.diff: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  baseline/live/contextd-r1/final_tests.json: 510ab8a63e1b29161501e02683ab8dfe388c069befb344a7a89624eac17fcda9
+  baseline/live/contextd-r1/score.json: ddbd8b364e80ab4c0c08a6114bbcafcf137b80eb9e0d6edc258df85dd3889068
+  baseline/live/contextd-r1/score_cf.json: 815bc671981634f22d98ceff83c36e829cd65afdc42f3ebf75cfd1a6e5701775
+  baseline/live/contextd-r1/trace.jsonl: de8bf0d49127c7bb14d2aeabc489b5abd4e9b9515a42580e1fb5e71ebe4b0171
+  baseline/live/contextd-r2/exec.jsonl: 6475078eea00074d2f346fc0a7a8e0eb4c4e1c1dbb92c0ad9c7dc3f6178a9f73
+  baseline/live/contextd-r2/final.diff: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  baseline/live/contextd-r2/final_tests.json: 510ab8a63e1b29161501e02683ab8dfe388c069befb344a7a89624eac17fcda9
+  baseline/live/contextd-r2/score.json: 7bcc2f7c2c5bbd1afc3c370dfadc98fe988579d51f6326c2df96eebe6594b18c
+  baseline/live/contextd-r2/score_cf.json: fab5138979fd0bd478ea935cce7a0279f92191377027457bb888e6cb3b1401e6
+  baseline/live/contextd-r2/trace.jsonl: d8408830f07ff9350dc50ad84950be4b5f2796af2954ffe541bac6db1b847fb5
+  baseline/live/contextd-r3/exec.jsonl: 0be351aa2d9b67657f732bcbfc103211abb60913ab5ac902983f8997cb945dc9
+  baseline/live/contextd-r3/final.diff: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  baseline/live/contextd-r3/final_tests.json: 510ab8a63e1b29161501e02683ab8dfe388c069befb344a7a89624eac17fcda9
+  baseline/live/contextd-r3/score.json: 75df903528287d64d3736b33d51ebe2a1339d23fe77b7e572de70ae0cec40767
+  baseline/live/contextd-r3/score_cf.json: 30d09f3bb2ce90cf851affd6177d3299e1a36675c5a33a8520f21be74589a280
+  baseline/live/contextd-r3/trace.jsonl: ff0ec429d53cc2e6fb1517f29ff5dbd42e6f6eec2993caa730c9f97d31bd4e83
+  baseline/live/contextd-r4/exec.jsonl: 85528e5a2b5ec1166e6f1757d16aaeeb8b3319b71508d47ba0db351cefc3293f
+  baseline/live/contextd-r4/final.diff: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  baseline/live/contextd-r4/final_tests.json: 510ab8a63e1b29161501e02683ab8dfe388c069befb344a7a89624eac17fcda9
+  baseline/live/contextd-r4/score.json: 1d754f2cb67f916a919664b2c61aacdf6868e90a364da49122d81c5f076a82f8
+  baseline/live/contextd-r4/score_cf.json: e1400ed9ee0dc36c644adadfd3222f9cef08950cbce08ddb4d5199515cca4b7c
+  baseline/live/contextd-r4/trace.jsonl: 6ee9fb29735be98a156b91a61ef37206af2822ec22dd685fdc357da712f1973c
+  baseline/live/contextd-r5/exec.jsonl: e0e70de12cb9a75bf153da263817b9533d3518ddf40ceaa108d4f7c7aed4f2cd
+  baseline/live/contextd-r5/final.diff: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  baseline/live/contextd-r5/final_tests.json: 510ab8a63e1b29161501e02683ab8dfe388c069befb344a7a89624eac17fcda9
+  baseline/live/contextd-r5/score.json: 3b6a344c8801852969425eeeecf7a986f6a91f42143bf75294dfc8abc19506ff
+  baseline/live/contextd-r5/score_cf.json: f8ce23e7b0f4dc9ca6e268ad1e89926ac36dfde34f01bae2fb1df1f026d4b012
+  baseline/live/contextd-r5/trace.jsonl: 66c3a220b52669dde382d6da4e8b57e734de6cabdfbe4ab17b2461fea50fe6dd
+  baseline/live/matrix.json: 465e53fab12320b297c5f5619c88fee03811caae3e91e923fee49ae8a0a5dc7e
+  baseline/live/none-r1/exec.jsonl: cbfbb53ebbce3ae318707b5934609728bd0d11a7b1a716fb1f04a81090cd3cd1
+  baseline/live/none-r1/final.diff: 9abde5fe3154b30aeb635caa413a0d72b5d6a1fd43b04a6d90765c4849469904
+  baseline/live/none-r1/final_tests.json: e0848b4fe074b565d8ae5db6f674c39ae9f85524badd97af89ffab64b31721c6
+  baseline/live/none-r1/score.json: 07e819d46847a8e95003d5baf493f23508ae445cb8413e5beadf06d0ddeda2a4
+  baseline/live/none-r1/score_cf.json: 30e4f31989d50a1473491524fd79b307c3eb5e490a64269615361877c90a4bec
+  baseline/live/none-r1/trace.jsonl: b99a7e315628c4f49922db3561a7f176bda91533831ab060dae451379eb53d4a
+  baseline/live/none-r2/exec.jsonl: e2e65ccdc0ef2342cab5ac93b64e982fe4ba8cf875c2c5b7d2a60ff4fc19c99d
+  baseline/live/none-r2/final.diff: 574cf6f5c2bb6e8d52067ce295a412d0efc582c3cef48da8e3303cc72dd20a66
+  baseline/live/none-r2/final_tests.json: e0848b4fe074b565d8ae5db6f674c39ae9f85524badd97af89ffab64b31721c6
+  baseline/live/none-r2/score.json: 8729e1303432c51973ef2a90a5115726fc814e40f5b676976208dd22787bf3e7
+  baseline/live/none-r2/score_cf.json: 46747b0f525369d3f3043f3d6bb49c20084bbd2fb9e0a2c4482c2c04abea549e
+  baseline/live/none-r2/trace.jsonl: 97a4d714fbd0d70d1729c9fdfd2c273e9e2982a91cf33cb6b9c10f8f137560d2
+  baseline/live/none-r3/exec.jsonl: 091bacd499a291be8081608f3db4b5087280110588b52975525bc806bcbbf69c
+  baseline/live/none-r3/final.diff: 649be23d08881544245375912efd6da06aac0308ad5d284c8481c4585a4d3e2e
+  baseline/live/none-r3/final_tests.json: e0848b4fe074b565d8ae5db6f674c39ae9f85524badd97af89ffab64b31721c6
+  baseline/live/none-r3/score.json: c1cff9ac98a1236598db1cd3423deaad8607b1083efbd8f66165d6b31a1e4cfb
+  baseline/live/none-r3/score_cf.json: 89ff8919603d014e6d9b15bd8afedb0a50975749996ff5803cca9148eca64ad1
+  baseline/live/none-r3/trace.jsonl: 39bf020febec1ab3bb6b96338aa8a36db1f5f93ba4a94dc67b0da18fc4170363
+  baseline/live/none-r4/exec.jsonl: b5f8534024f75fda0310c7eea04023018afdd1672908ed0e186791b134c60c1d
+  baseline/live/none-r4/final.diff: 21246dff041a2e99ca26b0f9543b8a4a6c2f3e0d538b0978988c49bee212d5a7
+  baseline/live/none-r4/final_tests.json: e0848b4fe074b565d8ae5db6f674c39ae9f85524badd97af89ffab64b31721c6
+  baseline/live/none-r4/score.json: c1cfedf0724e698376e1cec664ca90822a535eb073eba500b8c267cab2a4ea89
+  baseline/live/none-r4/score_cf.json: 3ad8c25ae1d3993d52af78722433c44816ffe1bed5300e9717d325c57ca60d5e
+  baseline/live/none-r4/trace.jsonl: 0bef0a7431a3eae093161c624c76ccf5f5e9307fff480daa079fe042378c9daf
+  baseline/live/none-r5/exec.jsonl: c93f392aa749d5bbb2b48223b94ca5f098c2b8ab94eb851579a3aa9b17f012cb
+  baseline/live/none-r5/final.diff: 1256ca00f0958cbd84fdfaeddadb1e3fd846e59d24126d0cbeaa20aa8ed3ac99
+  baseline/live/none-r5/final_tests.json: e0848b4fe074b565d8ae5db6f674c39ae9f85524badd97af89ffab64b31721c6
+  baseline/live/none-r5/score.json: df22e368134dca00da96a5b0513c4e0451587d4f6ca42681b2ff3562c2095b7f
+  baseline/live/none-r5/score_cf.json: c502d831b6e46135ee3b226d2e76176256bf3aa50807c726fbb09c4dd7a4ea27
+  baseline/live/none-r5/trace.jsonl: 112e8535d8acbed2284c94dfc499309c5a2668d5050d804e38e25d6afece65dc
+  baseline/live/report.json: 1635e96e7be4d43704039351dbdf8c06f71d56b9e7dc21f6dedc13e4c0703966
+  baseline/live/report.md: 4eff8a3c75eb42c35c0169472ee88e811d7229307f24f3b68a5c510bfc7e8924
+  baseline/live/schedule.json: 6cacd8d4403791aa00cd4c7931535b957f413b27f25c1abd05e35b4c8cd1fe0d
+  baseline/packet/contextd_ladder.json: 767c31d8887737ebeaf16460ce9da6f16648a98f6252486fd6e51a3abf0b62d2
+  baseline/packet/contextd_provenance.json: 0ccc49ef38f1d92e71cd7842d5a2dfc808a58802b9a738f110d28e329c8e6606
+  baseline/replay/gen-1/briefing.reply: e44ea0cdb976e412b9e61d0a9620961b2632723110e53942f62efc167b9fcc95
+  baseline/replay/gen-1/events.jsonl: 31c15067844d964040fef61ec8a1b2ec7c191be9aecfa30a221087750204c5c8
+  baseline/replay/gen-1/provenance.json: cfdecf869bdf1605ce38f1abfe7347abb0dfb1d236a66dcf197d1d581064b2ac
+  baseline/replay/gen-2/briefing.reply: 829104cd648fa63140382b0845b3f9ab70582d824437e405d7c5406bd9a46942
+  baseline/replay/gen-2/events.jsonl: 8e196cd0fa03a5e4a246425fe77ff2eceaf9d74f1327686a7145003388207bf5
+  baseline/replay/gen-2/provenance.json: 0340fabbb2460b5fa399f5e58785a1a4e2176c5fbf52b4939383b6cbd8530ef8
+  baseline/replay/gen-3/briefing.reply: b8d6a696be559f92e2110e0abaf0a424f4a0347aef8c21f55e38eefd3cb1023e
+  baseline/replay/gen-3/events.jsonl: fd5f43cf691e732e8aae2e044096eb662ac1d40f4fe3cb6167a56a0859c4c0e6
+  baseline/replay/gen-3/provenance.json: 5168d75a5135e7f4d0a027299a00a5fc9844bd8a490d6693b877ab9dfa29f904
+  baseline/replay/variation.json: 6c7a70325783c416cf86d3e0ba89af13c82d013aa4b68553a89e67fd9fe2be00

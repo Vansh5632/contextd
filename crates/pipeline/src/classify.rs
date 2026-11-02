@@ -68,6 +68,7 @@ pub fn classify_use_case(event: &RawEvent) -> UseCase {
         },
 
         EventSource::Editor => UseCase::Coding,
+        EventSource::Claim => UseCase::GeneralProductivity,
     }
 }
 
@@ -127,6 +128,7 @@ pub fn classify_memory_type(event: &RawEvent) -> MemoryType {
         },
 
         EventSource::Editor => MemoryType::Episodic,
+        EventSource::Claim => MemoryType::Episodic,
     }
 }
 
@@ -387,6 +389,7 @@ mod tests {
             EventSource::Proc,
             EventSource::Manifest,
             EventSource::Editor,
+            EventSource::Claim,
         ] {
             let empty = event(source.clone(), json!({}));
             let _ = classify_use_case(&empty);

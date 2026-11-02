@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use contextd_core::config::AppConfig;
-use contextd_core::protocol::ContextRequest;
+use contextd_core::protocol::{ContextRequest, UserClaimKind};
 
 pub const USAGE: &str = "\
 contextd — a local context engine for AI coding agents
@@ -20,6 +20,11 @@ COMMANDS:
     run                 Run the daemon in the foreground (default)
     mcp                 Speak MCP over stdio. This is what an agent launches.
     intent <TEXT>       Record what you are working on
+    claim constraint <TEXT>
+    claim decision <TEXT>
+    claim ruled-out <TEXT>
+    claim retract <CLAIM_ID>
+    claim done          Mark the current task done
     status              Show whether the daemon is running and what it holds
     install             Set up shell hooks, git hooks, and a systemd unit
     uninstall           Undo what `install` did
@@ -29,10 +34,47 @@ Configuration is read from the file printed by `contextd status`.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
+pub enum ClaimCommand {
+    Constraint(String),
+    Decision(String),
+    RuledOut(String),
+    Retract(String),
+    Done,
+}
+
+impl ClaimCommand {
+    fn to_request(&self) -> ContextRequest {
+        match self {
+            Self::Constraint(text) => ContextRequest::UserClaim {
+                kind: UserClaimKind::Constraint,
+                text: Some(text.clone()),
+            },
+            Self::Decision(text) => ContextRequest::UserClaim {
+                kind: UserClaimKind::Decision,
+                text: Some(text.clone()),
+            },
+            Self::RuledOut(text) => ContextRequest::UserClaim {
+                kind: UserClaimKind::RuledOut,
+                text: Some(text.clone()),
+            },
+            Self::Retract(claim_id) => ContextRequest::UserClaim {
+                kind: UserClaimKind::Retract,
+                text: Some(claim_id.clone()),
+            },
+            Self::Done => ContextRequest::UserClaim {
+                kind: UserClaimKind::Done,
+                text: None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Run,
     Mcp,
     Intent(String),
+    Claim(ClaimCommand),
     Status,
     Install,
     Uninstall,
@@ -65,8 +107,45 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             }
             Command::Intent(text)
         }
+        "claim" => parse_claim(&args[1..])?,
         other => return Err(format!("unknown command `{other}`. Try `contextd help`.")),
     })
+}
+
+fn parse_claim(args: &[String]) -> Result<Command, String> {
+    let Some(kind) = args.first().map(String::as_str) else {
+        return Err(
+            "claim needs a kind: constraint, decision, ruled-out, retract, or done".to_string(),
+        );
+    };
+    let rest = args[1..].join(" ");
+    Ok(Command::Claim(match kind {
+        "done" => {
+            if !rest.trim().is_empty() {
+                return Err("claim done does not take an argument".to_string());
+            }
+            ClaimCommand::Done
+        }
+        "constraint" | "decision" | "ruled-out" | "retract" => {
+            if rest.trim().is_empty() {
+                return Err(format!(
+                    "claim {kind} needs some text, e.g. `contextd claim {kind} \"...\"`"
+                ));
+            }
+            match kind {
+                "constraint" => ClaimCommand::Constraint(rest),
+                "decision" => ClaimCommand::Decision(rest),
+                "ruled-out" => ClaimCommand::RuledOut(rest),
+                "retract" => ClaimCommand::Retract(rest),
+                _ => unreachable!(),
+            }
+        }
+        other => {
+            return Err(format!(
+                "unknown claim kind `{other}`. Use constraint, decision, ruled-out, retract, or done."
+            ));
+        }
+    }))
 }
 
 /// Tell the running daemon what the user is working on.
@@ -80,6 +159,41 @@ pub async fn run_intent(config: &AppConfig, text: &str) -> anyhow::Result<()> {
             println!("Noted: {text}");
             Ok(())
         }
+        Err(err) => Err(anyhow::anyhow!(
+            "could not reach the daemon at {}: {err}\nIs contextd running?",
+            config.socket_path.display()
+        )),
+    }
+}
+
+pub async fn run_claim(config: &AppConfig, command: ClaimCommand) -> anyhow::Result<()> {
+    let request = command.to_request();
+    match mcp::daemon::ask(&config.socket_path, &request).await {
+        Ok(body) => match serde_json::from_str::<serde_json::Value>(&body) {
+            Ok(value) if value.get("error").is_some() => {
+                anyhow::bail!(
+                    "{}",
+                    value
+                        .get("error")
+                        .and_then(|error| error.as_str())
+                        .unwrap_or("claim was refused")
+                );
+            }
+            Ok(value) => {
+                if let Some(id) = value.get("claim_id").and_then(|id| id.as_str())
+                    && !id.is_empty()
+                {
+                    println!("Noted: {id}");
+                    return Ok(());
+                }
+                println!("Noted.");
+                Ok(())
+            }
+            Err(_) => {
+                println!("Noted.");
+                Ok(())
+            }
+        },
         Err(err) => Err(anyhow::anyhow!(
             "could not reach the daemon at {}: {err}\nIs contextd running?",
             config.socket_path.display()
@@ -130,24 +244,33 @@ pub async fn run_status(config: &AppConfig) -> anyhow::Result<()> {
 }
 
 fn describe(snapshot: &serde_json::Value) {
-    let count = |key: &str| {
-        snapshot
-            .get(key)
-            .and_then(|value| value.as_array())
-            .map_or(0, Vec::len)
-    };
-
     if let Some(session) = snapshot.get("session_id").and_then(|v| v.as_str()) {
         println!("session    {session}");
     }
-    if let Some(intent) = snapshot
-        .get("intent")
-        .and_then(|intent| intent.get("text"))
-        .and_then(|text| text.as_str())
-    {
-        println!("intent     {intent}");
+    match snapshot.get("focal_task") {
+        Some(focal) if !focal.is_null() => {
+            if let Some(id) = focal.get("id").and_then(|value| value.as_str()) {
+                println!("task       {id}");
+            }
+            if let Some(intent) = focal
+                .get("intent")
+                .and_then(|intent| intent.get("text"))
+                .and_then(|text| text.as_str())
+            {
+                println!("intent     {intent}");
+            }
+            if let Some(reality) = focal
+                .get("reality")
+                .and_then(|value| value.as_array())
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("text"))
+                .and_then(|text| text.as_str())
+            {
+                println!("reality    {reality}");
+            }
+        }
+        _ => println!("task       none"),
     }
-    println!("watching   {} recent events", count("recent_activity"));
 
     if let Some(archived) = snapshot
         .get("archived")
@@ -345,9 +468,60 @@ mod tests {
 
     #[test]
     fn help_lists_every_command() {
-        for command in ["run", "mcp", "intent", "status", "install", "uninstall"] {
+        for command in [
+            "run",
+            "mcp",
+            "intent",
+            "claim",
+            "status",
+            "install",
+            "uninstall",
+        ] {
             assert!(USAGE.contains(command), "help omits `{command}`");
         }
+    }
+
+    #[test]
+    fn claim_parses_each_kind() {
+        assert_eq!(
+            parse(&args(&[
+                "claim",
+                "constraint",
+                "do",
+                "not",
+                "change",
+                "the",
+                "API"
+            ]))
+            .unwrap(),
+            Command::Claim(ClaimCommand::Constraint(
+                "do not change the API".to_string()
+            ))
+        );
+        assert_eq!(
+            parse(&args(&["claim", "decision", "keep the signature"])).unwrap(),
+            Command::Claim(ClaimCommand::Decision("keep the signature".to_string()))
+        );
+        assert_eq!(
+            parse(&args(&["claim", "ruled-out", "redis"])).unwrap(),
+            Command::Claim(ClaimCommand::RuledOut("redis".to_string()))
+        );
+        assert_eq!(
+            parse(&args(&["claim", "retract", "c_abc"])).unwrap(),
+            Command::Claim(ClaimCommand::Retract("c_abc".to_string()))
+        );
+        assert_eq!(
+            parse(&args(&["claim", "done"])).unwrap(),
+            Command::Claim(ClaimCommand::Done)
+        );
+    }
+
+    #[test]
+    fn claim_requires_a_kind_and_text() {
+        assert!(parse(&args(&["claim"])).is_err());
+        assert!(parse(&args(&["claim", "constraint"])).is_err());
+        assert!(parse(&args(&["claim", "frobnicate", "x"])).is_err());
+        assert!(parse(&args(&["claim", "done", "extra"])).is_err());
     }
 
     #[test]
@@ -415,11 +589,14 @@ mod tests {
     fn status_describes_a_snapshot_without_panicking_on_a_sparse_one() {
         // The daemon may reply before anything has been recorded.
         describe(&serde_json::json!({}));
-        describe(&serde_json::json!({"recent_activity": []}));
+        describe(&serde_json::json!({"focal_task": null}));
         describe(&serde_json::json!({
             "session_id": "abc",
-            "intent": {"text": "fixing login"},
-            "recent_activity": [1, 2, 3],
+            "focal_task": {
+                "id": "t_1",
+                "intent": {"text": "fixing login"},
+                "reality": [{"text": "pytest exited 1"}]
+            },
             "archived": {"event_count": 40},
         }));
     }

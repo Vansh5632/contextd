@@ -1,0 +1,181 @@
+{
+  "arm": "contextd",
+  "constraint_violations": [],
+  "env_setup_installs": [],
+  "failure_layers": [
+    "placement",
+    "outcome"
+  ],
+  "failure_tag": "placement",
+  "final_diff_error": null,
+  "final_tests": {
+    "apply": "pass",
+    "hidden": {
+      "test_pool_cap_hidden.py::test_cap_async_max_three_four_origins[asyncio]": "fail",
+      "test_pool_cap_hidden.py::test_cap_async_max_three_four_origins[trio]": "fail",
+      "test_pool_cap_hidden.py::test_cap_sync_max_three_four_origins": "fail",
+      "test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_async[asyncio]": "pass",
+      "test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_async[trio]": "pass",
+      "test_pool_cap_hidden.py::test_keepalive_cleanup_unchanged_sync": "pass",
+      "test_pool_cap_hidden.py::test_sync_tree_matches_regenerated[httpcore/_async-httpcore/_sync]": "pass",
+      "test_pool_cap_hidden.py::test_sync_tree_matches_regenerated[tests/_async-tests/_sync]": "pass",
+      "test_pool_cap_hidden.py::test_unasync_script_check_passes": "pass",
+      "test_upstream_concurrency_async.py::test_connection_pool_concurrency": "fail",
+      "test_upstream_concurrency_sync.py::test_connection_pool_concurrency": "fail"
+    },
+    "suite": "pass",
+    "unasync_check": "pass",
+    "visible": "fail"
+  },
+  "forbidden_actions": [],
+  "forbidden_count": 0,
+  "frontier_event": null,
+  "gold_variant": "real",
+  "model": "gpt-6.1-sol",
+  "packet": {
+    "ladder": {
+      "atoms": [
+        {
+          "id": "finding_idle_not_counted",
+          "role": "required",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "decision_idle_counts",
+          "role": "required",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "constraint_signatures",
+          "role": "constraint",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "constraint_no_new_deps",
+          "role": "constraint",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "ruled_out_mock_backend",
+          "role": "ruled_out",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "ruled_out_lock",
+          "role": "ruled_out",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "stale_redis_counter",
+          "role": "stale",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "unresolved_keepalive_comprehension",
+          "role": "unresolved",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "next_step_create_branch",
+          "role": "next_step",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "optional_host_header_fix",
+          "role": "optional",
+          "selected": false,
+          "stored": false
+        },
+        {
+          "id": "optional_exact_counts",
+          "role": "optional",
+          "selected": false,
+          "stored": false
+        }
+      ],
+      "briefing_tokens": 1122,
+      "event_tokens": 1807,
+      "events_by_source": {
+        "file_system": 6,
+        "git": 1,
+        "shell": 24
+      },
+      "observation_recall": 0.0,
+      "selection_recall": 0.0,
+      "stored_events": 31,
+      "stored_events_in_briefing": 14
+    },
+    "matched_atoms": [],
+    "missing_atoms": [
+      "finding_idle_not_counted",
+      "decision_idle_counts",
+      "constraint_signatures",
+      "constraint_no_new_deps",
+      "ruled_out_mock_backend",
+      "ruled_out_lock",
+      "next_step_create_branch"
+    ],
+    "packet_tokens": 1122,
+    "required_recall": 0.0,
+    "stale_as_current": 0,
+    "stale_marked": 0,
+    "token_precision": 0.0,
+    "unit_atoms": [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      []
+    ],
+    "unit_precision": 0.0,
+    "units": 19,
+    "unresolved_present": false
+  },
+  "packet_status": "scored",
+  "rep": 5,
+  "repeated_work": [],
+  "repeated_work_calls": 0,
+  "repeated_work_share": 0.0,
+  "solved": false,
+  "thread_id": "01a0fba1-0aeb-7583-a842-4051a5fdebde",
+  "tokens_to_frontier": null,
+  "tool_calls": {
+    "command": 6,
+    "edit": 0,
+    "other_tool": 0,
+    "total": 6
+  },
+  "trial": "contextd-r5",
+  "turns_to_frontier": null,
+  "unparsed_commands": 0,
+  "usage": {
+    "cache_write_input_tokens": 14216,
+    "cached_input_tokens": 44073,
+    "input_tokens": 58304,
+    "output_tokens": 533,
+    "reasoning_output_tokens": 14
+  }
+}

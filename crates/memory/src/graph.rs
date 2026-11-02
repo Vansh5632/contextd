@@ -309,6 +309,7 @@ pub fn entities_of(event: &ProcessedEvent) -> Vec<Entity> {
                 entities.push(Entity::new(EntityKind::Repo, repo));
             }
         }
+        EventSource::Claim => {}
     }
 
     // An error is worth a node whatever produced it: "what else is going on

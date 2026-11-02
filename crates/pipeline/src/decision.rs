@@ -5,7 +5,7 @@
 //! readable place instead of being spread across the pruner, the archiver, and
 //! the broker.
 
-use contextd_core::event::ProcessedEvent;
+use contextd_core::event::{EventSource, ProcessedEvent};
 use contextd_core::memory::{MemoryType, UseCase};
 
 /// Below this, an event is noise unless something else redeems it.
@@ -79,6 +79,9 @@ pub fn decide(event: &ProcessedEvent, use_case: UseCase, memory_type: MemoryType
 /// Only quiet events can Drop (`decide` never returns Drop at or above
 /// [`NOISE_SCORE`]), so the common ingest path does not run classify/summarize.
 pub fn should_drop(event: &ProcessedEvent) -> bool {
+    if event.raw.source == EventSource::Claim {
+        return false;
+    }
     if event.score >= NOISE_SCORE {
         return false;
     }

@@ -1,0 +1,33 @@
+# Case-insensitive Python regexes. Word boundaries matter: upstream LICENSE.md
+# contains "Redistribution", which must not match the redis term.
+
+# Must not appear in any workspace file or in `git log -p --all`.
+tree_terms:
+  - '\bredis\b'
+  - '\bvalkey\b'
+  - '\bmemcached\b'
+  - '\bruled out\b'
+  - '\bhypothesis\b'
+  - '\bidle connections? (do not |don''t )?count'
+  - '\badmission\b'
+
+# Must not appear in what we author for the workspace. Scopes default to all of:
+#   visible_test      the visible test file
+#   commit_messages   every commit message in the workspace history
+#   patch_added_lines added lines of the plant and followup patches
+# `is_idle()` in the planted bug does not match `\bidle\b` ("_" is a word character).
+our_change_terms:
+  - pattern: '\bidle\b'
+  - pattern: '\bkeep-?alive\b'
+  - pattern: '\brace[sy]?\b'
+  - pattern: '\block(s|ed|ing)?\b'
+  - pattern: '\bevict\w*'
+  - pattern: '\bredis\b'
+  - pattern: '\bdatabase\b'
+  - pattern: '_assign_requests_to_connections'
+  - pattern: '\bmax_connections\b'
+    scopes: [commit_messages]
+
+# Patches that must only delete lines, relative to the episode directory.
+deletion_only_patches:
+  - patches/remove_covering_test.patch

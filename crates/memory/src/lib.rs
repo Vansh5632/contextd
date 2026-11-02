@@ -17,6 +17,7 @@
 
 pub mod graph;
 pub mod graph_store;
+pub mod project;
 pub mod tier2;
 pub mod working;
 

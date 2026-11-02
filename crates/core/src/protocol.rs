@@ -16,6 +16,8 @@
 //!
 //! Anything without a `query` key is treated as an ingested [`RawEvent`].
 
+use crate::claim::{ClaimConfidence, ClaimKind};
+
 use serde::{Deserialize, Serialize};
 
 /// How many results a search-style request returns when the caller does not say.
@@ -50,6 +52,32 @@ pub enum ContextRequest {
     },
     /// Declare what the user is trying to do, so it can sit beside observations.
     Intent { text: String },
+    /// A user-stated claim, sent only by `contextd claim` / `contextd intent`.
+    UserClaim {
+        kind: UserClaimKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
+    /// An agent-inferred claim, sent only by the `note_claim` MCP tool.
+    AgentClaim {
+        kind: ClaimKind,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        confidence: Option<ClaimConfidence>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replaces: Option<String>,
+    },
+}
+
+/// The kinds `contextd claim` will send. Intent stays on the `intent` verb.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserClaimKind {
+    Constraint,
+    Decision,
+    RuledOut,
+    Retract,
+    Done,
 }
 
 impl ContextRequest {
@@ -67,7 +95,9 @@ impl ContextRequest {
             ContextRequest::Now { text } => text.as_deref()?,
             ContextRequest::Search { text, .. }
             | ContextRequest::Recall { text, .. }
-            | ContextRequest::Intent { text } => text.as_str(),
+            | ContextRequest::Intent { text }
+            | ContextRequest::AgentClaim { text, .. } => text.as_str(),
+            ContextRequest::UserClaim { text, .. } => text.as_deref()?,
         };
         let trimmed = text.trim();
         (!trimmed.is_empty()).then_some(trimmed)
@@ -146,5 +176,39 @@ mod tests {
         assert_eq!(ContextRequest::resolve_limit(Some(0)), 1);
         assert_eq!(ContextRequest::resolve_limit(Some(9_999)), MAX_SEARCH_LIMIT);
         assert_eq!(ContextRequest::resolve_limit(Some(7)), 7);
+    }
+
+    #[test]
+    fn user_claim_round_trips() {
+        let request = ContextRequest::UserClaim {
+            kind: UserClaimKind::Constraint,
+            text: Some("do not change the public signature".to_string()),
+        };
+        let encoded = serde_json::to_string(&request).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"query":"user_claim","kind":"constraint","text":"do not change the public signature"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<ContextRequest>(&encoded).unwrap(),
+            request
+        );
+    }
+
+    #[test]
+    fn agent_claim_round_trips() {
+        let request = ContextRequest::AgentClaim {
+            kind: ClaimKind::Reality,
+            text: "the check lives in _assign_requests_to_connections".to_string(),
+            confidence: Some(ClaimConfidence::Inferred),
+            replaces: None,
+        };
+        let encoded = serde_json::to_string(&request).unwrap();
+        assert!(encoded.contains(r#""query":"agent_claim""#));
+        assert!(encoded.contains(r#""kind":"reality""#));
+        assert_eq!(
+            serde_json::from_str::<ContextRequest>(&encoded).unwrap(),
+            request
+        );
     }
 }

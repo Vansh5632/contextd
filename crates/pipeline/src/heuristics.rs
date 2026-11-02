@@ -64,6 +64,7 @@ pub fn process_event(raw: RawEvent) -> ProcessedEvent {
         EventSource::Manifest => {
             0.95 // Almost maximum importance — context is definitely changing
         }
+        EventSource::Claim => 1.0,
         // Fallback for Editor until we build it
         _ => 0.5,
     };

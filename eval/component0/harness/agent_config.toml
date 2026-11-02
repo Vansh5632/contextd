@@ -1,0 +1,357 @@
+schema_version = 1
+
+[codex]
+version = "0.159.3"
+npm_package = "@openai/codex@0.159.3"
+npm_integrity = "sha512-hg4nlqCwRb87GocxNnHvz4sadOrdJ71mO0a4CUYWXjAozJe2gtuAdRFldKGSQXw9m7SgR4ydis12KDVVPgzDkQ=="
+npm_tarball_sha256 = "31d5e584e93e118dd37dbb8bc89ddbbe9998178fc437dc0b9d0f7cc72ef0cf79"
+linux_x64_package = "@openai/codex@0.159.3-linux-x64"
+linux_x64_integrity = "sha512-xlHydfOksnNt/qz4BEVFvjMWunweaVSNtha/DkVUwWZnVZxbqiJwsXSl2iZDk04b6k/g0OI7jU06XqzHB2s5og=="
+linux_x64_tarball_sha256 = "0719027cfe326e248971a2dff0a391c3532a3d838b4e3cc660bf93b2a606d2ce"
+source_repo = "openai/codex"
+source_tag = "rust-v0.159.3"
+# Annotated tag object. The tag points at source_commit.
+source_tag_object = "8e46774a94a745ffdf676bd7a8aa36466bbd4f99"
+source_commit = "01fc69f4026735edfdf6789820549727a4867b11"
+model = "gpt-6.1-sol"
+reasoning_effort = "medium"
+provider = "openai"
+wire_api = "responses"
+base_url = "https://api.openai.com/v1"
+# use_responses_lite still opens a websocket to wss://api.openai.com/v1/responses and, after 5
+# failed connects, falls back to HTTPS POST /v1/responses. websocket-client/src/dialer.rs resolves
+# HTTPS_PROXY before the socket (verified: a blackhole HTTPS_PROXY gets connection refused on that
+# wss URL, then the HTTPS fallback).
+transport = "websocket-then-https"
+auth_env = "CODEX_API_KEY"
+
+# Values from the models.json embedded in the 0.159.3 binary. `codex debug models` rewrites
+# shell_type through the serde alias below, so it prints unified_exec. With API-key auth against
+# api.openai.com the remote /models refresh is not used, so these stay fixed per version.
+[codex.model_catalog]
+slug = "gpt-6.1-sol"
+tool_mode = "code_mode_only"
+# Bundled JSON token. ConfigShellToolType aliases default|local|shell_command onto UnifiedExec
+# (codex-rs/protocol/src/openai_models.rs). The exec path is still unified exec.
+shell_type = "shell_command"
+shell_type_effective = "unified_exec"
+apply_patch_tool_type = "freeform"
+use_responses_lite = true
+prefer_websockets = true
+supports_parallel_tool_calls = true
+default_reasoning_level = "low"
+default_reasoning_summary = "none"
+supports_reasoning_summaries = true
+supported_reasoning_levels = ["low", "medium", "high", "xhigh", "max", "ultra"]
+multi_agent_version = "v2"
+context_window = 272000
+truncation_policy = { mode = "tokens", limit = 10000 }
+minimal_client_version = "0.153.0"
+experimental_supported_tools = ["send_user_message_async", "clock"]
+supports_search_tool = true
+web_search_tool_type = "text_and_image"
+# code_mode_only: freeform `exec` (JS cell) plus `wait`, and request_user_input_async
+# (the catalog name send_user_message_async; no config key removes it). Nested cell tools are
+# exec_command/write_stdin/apply_patch/view_image. clock.sleep is off via features.sleep_tool;
+# clock.curr_time is omitted from the cell via features.code_mode.excluded_tool_namespaces.
+top_level_tools = ["exec", "wait", "request_user_input_async"]
+nested_tools = ["exec_command", "write_stdin", "apply_patch", "view_image"]
+
+[image]
+name = "contextd-c0-agent:v0"
+dockerfile = "docker/agent.Dockerfile"
+build_script = "scripts/build_agent_image.sh"
+base = "python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f"
+node_version = "24.21.0"
+node_tarball_sha256 = "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
+python_requirements = "docker/agent-requirements.txt"
+python_requirements_exclude_newer = "2025-04-25"
+git_version = "2.47.3"
+ripgrep_version = "14.1.1"
+user = "agent"
+home = "/home/agent"
+workdir = "/workspace"
+httpcore_installed = false
+agents_md_present = false
+
+[workspace]
+path = "/workspace"
+upstream = "encode/httpcore"
+commit = "98209758cc14e1a5f966fe1dfdc1064b94055d8c"
+import_mechanism = "pth"
+pth_file = "/usr/local/lib/python3.12/site-packages/workspace.pth"
+pth_contents = "/workspace"
+# Chosen over `pip install -e`: no build backend or network is needed at trial start, and unlike
+# PYTHONPATH it survives shell_environment_policy.inherit = "core".
+test_command = ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+baseline_result = "214 passed, 6 xpassed"
+
+[sandbox]
+option = "B"
+codex_sandbox = "off"
+codex_flag = "--dangerously-bypass-approvals-and-sandbox"
+reason = "bwrap cannot create a usable user namespace inside Docker on this host (kernel.apparmor_restrict_unprivileged_userns=1), even with --privileged; legacy Landlock rejects the :workspace profile"
+probe_command = "codex sandbox -P :workspace -C /workspace -- ls"
+
+[[sandbox.evidence]]
+docker_flags = ""
+result = "bwrap: No permissions to create a new namespace"
+
+[[sandbox.evidence]]
+docker_flags = "--security-opt seccomp=unconfined"
+result = "bwrap: Failed to make / slave: Permission denied"
+
+[[sandbox.evidence]]
+docker_flags = "--security-opt apparmor=unconfined"
+result = "bwrap: No permissions to create a new namespace"
+
+[[sandbox.evidence]]
+docker_flags = "--security-opt seccomp=unconfined --security-opt apparmor=unconfined [--cap-add NET_ADMIN|SYS_ADMIN] [--security-opt systempaths=unconfined]"
+result = "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted"
+
+[[sandbox.evidence]]
+docker_flags = "--security-opt seccomp=unconfined --security-opt apparmor=unconfined, sandbox_workspace_write.network_access=true"
+result = "bwrap: setting up uid map: Permission denied"
+
+[[sandbox.evidence]]
+docker_flags = "--privileged"
+result = "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted"
+
+[[sandbox.evidence]]
+docker_flags = "--privileged --user 0"
+result = "bwrap: Can't mkdir /workspace/.agents: Permission denied"
+
+[[sandbox.evidence]]
+docker_flags = "(any) with -c features.use_legacy_landlock=true"
+result = "panic: permission profiles requiring direct runtime enforcement are incompatible with --use-legacy-landlock"
+
+[egress]
+compose_file = "docker/egress/compose.yaml"
+check_script = "scripts/check_egress.sh"
+proxy_image = "contextd-c0-egress:v0"
+proxy_base = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+proxy_software = "tinyproxy 1.11.2-r0"
+proxy_url = "http://egress:8888"
+allowed_connect = ["api.openai.com:443"]
+internal_network = "contextd-c0-internal"
+internal_subnet = "10.231.0.0/24"
+outbound_network = "contextd-c0-outbound"
+outbound_subnet = "10.231.1.0/24"
+
+[trial]
+container_env = [
+  "CODEX_API_KEY",
+  "CODEX_HOME=/home/agent/.codex",
+  "HTTPS_PROXY=http://egress:8888",
+  "HTTP_PROXY=http://egress:8888",
+  "NO_PROXY=",
+]
+# CODEX_API_KEY is passed by name so its value never appears in argv.
+docker_run = [
+  "docker", "run", "--rm", "-i",
+  "--name", "{container_name}",
+  "--network", "contextd-c0-internal",
+  "--cap-drop", "ALL",
+  "--security-opt", "no-new-privileges:true",
+  "-e", "CODEX_API_KEY",
+  "-e", "CODEX_HOME=/home/agent/.codex",
+  "-e", "HTTPS_PROXY=http://egress:8888",
+  "-e", "HTTP_PROXY=http://egress:8888",
+  "-e", "NO_PROXY=",
+  "-v", "{workspace_dir}:/workspace",
+  "-v", "{codex_home_dir}:/home/agent/.codex",
+  "-v", "{out_dir}:/out",
+  "contextd-c0-agent:v0",
+]
+prompt_via = "stdin"
+stdout = "events.jsonl"
+stderr = "stderr.log"
+codex_exec = [
+  "codex", "exec",
+  "--json",
+  "--strict-config",
+  "--ignore-user-config",
+  "--ignore-rules",
+  "--skip-git-repo-check",
+  "--dangerously-bypass-approvals-and-sandbox",
+  "-C", "/workspace",
+  "-m", "{model}",
+  "-o", "{last_message_path}",
+  "-c", "model_reasoning_effort=\"{reasoning_effort}\"",
+  "{config_overrides}",
+  "-",
+]
+last_message_path = "/out/last_message.txt"
+config_overrides = [
+  "-c", "approval_policy=\"never\"",
+  "-c", "sandbox_mode=\"danger-full-access\"",
+  "-c", "web_search=\"disabled\"",
+  "-c", "mcp_servers={}",
+  "-c", "project_doc_max_bytes=0",
+  "-c", "history.persistence=\"none\"",
+  "-c", "check_for_update_on_startup=false",
+  "-c", "analytics.enabled=false",
+  "-c", "feedback.enabled=false",
+  "-c", "otel.exporter=\"none\"",
+  "-c", "otel.trace_exporter=\"none\"",
+  "-c", "otel.metrics_exporter=\"none\"",
+  "-c", "memories.generate_memories=false",
+  "-c", "memories.use_memories=false",
+  "-c", "agents.enabled=false",
+  "-c", "skills.bundled.enabled=false",
+  "-c", "skills.include_instructions=false",
+  "-c", "shell_environment_policy.inherit=\"core\"",
+  "-c", "shell_environment_policy.ignore_default_excludes=false",
+  "--disable", "multi_agent",
+  "--disable", "apps",
+  "--disable", "plugins",
+  "--disable", "remote_plugin",
+  "--disable", "image_generation",
+  "--disable", "browser_use",
+  "--disable", "browser_use_external",
+  "--disable", "computer_use",
+  "--disable", "in_app_browser",
+  "--disable", "memories",
+  "--disable", "hooks",
+  "--disable", "tool_suggest",
+  "--disable", "goals",
+  "--disable", "skill_mcp_dependency_install",
+  "--disable", "workspace_dependencies",
+  "--disable", "multi_agent_v2",
+  "--disable", "sleep_tool",
+  "-c", "features.code_mode={excluded_tool_namespaces=[\"clock\"]}",
+]
+
+# What each non-obvious override controls (verified against 0.159.3 source and --strict-config).
+[trial.config_notes]
+web_search = "top-level key, enum disabled|cached|indexed|live; default is cached. Disabled makes create_web_search_tool return None (core/src/tools/hosted_spec.rs) and drops standalone web.run"
+project_doc_max_bytes = "0 skips AGENTS.md / AGENTS.override.md discovery entirely"
+agents_enabled = "agents.enabled=false forces multi_agent_version=disabled unless features.multi_agent_v2 is enabled, which takes precedence (core/src/config/mod.rs multi_agent_version_override). --disable multi_agent alone does not, because the catalog sets v2"
+multi_agent_v2 = "stable feature, default false; --disable keeps collab tools off even if a later default flips"
+sleep_tool = "stable feature, default true. gpt-6.1-sol lists clock, which registers clock.sleep as a top-level DirectModelOnly tool (core/src/tools/spec_plan.rs, handlers/sleep.rs). --disable sleep_tool removes it"
+clock_namespace = "clock.curr_time is registered whenever experimental_supported_tools contains clock, and code_mode_only hides that Direct tool from the top-level list because it is a nested cell tool. features.code_mode.excluded_tool_namespaces=[\"clock\"] omits the namespace from the cell (feature_configs.rs CodeModeConfigToml). There is no key that strips clock from the catalog"
+send_user_message_async = "catalog name registers request_user_input_async as DirectModelOnly (spec_plan.rs add_core_utility_tools). No feature flag gates that path. features.send_message_to_user_async is a different tool and defaults off. No config key disables request_user_input_async"
+search_tool = "model.supports_search_tool gates deferred tool_search, not web search (spec_plan.rs search_tool_enabled). The search_tool feature itself is removed and default false. tool_search is added only when some tool is deferred; mcp_servers={} plus apps/plugins disabled leaves nothing deferred, so it is not exposed. web_search=disabled is what turns the search tool off"
+otel_metrics_exporter = "default is statsig (https://ab.chatgpt.com/otlp/v1/metrics)"
+shell_environment_policy = "inherit=core keeps only PATH SHELL TMPDIR TEMP TMP HOME LANG LC_ALL LC_CTYPE LOGNAME USER, then default excludes drop *KEY* *SECRET* *TOKEN*; CODEX_API_KEY and *_PROXY never reach model-run commands"
+ignore_user_config = "skips $CODEX_HOME/config.toml only; -c overrides and CODEX_HOME auth still apply"
+ignore_rules = "skips user and project execpolicy .rules files"
+skip_git_repo_check = "only relaxes the git-repo requirement; implied by --dangerously-bypass-approvals-and-sandbox"
+ephemeral = "not used: it disables rollout persistence and switches history_mode away from paginated"
+dangerously_bypass = "sets sandbox_mode=danger-full-access and approval never; permission profile type=disabled"
+permissions_prompt_note = "model-visible permissions text states network access is enabled; actual egress is limited by the proxy"
+
+[codex_home]
+# Fresh empty host directory per trial, bind-mounted at /home/agent/.codex. Must not be under /tmp
+# inside the container (Codex refuses to create its arg0 helper links there).
+container_path = "/home/agent/.codex"
+rollout_glob = "sessions/????/??/??/rollout-*.jsonl"
+rollout_name = "rollout-{YYYY-MM-DDTHH-MM-SS UTC}-{thread_id}.jsonl"
+# Codex writes [projects."/workspace"] trust_level = "trusted" here; --ignore-user-config means it is never read back.
+generated_config_toml = true
+observed_entries = [
+  "config.toml",
+  "installation_id",
+  ".sandbox_migration",
+  "sessions/",
+  "shell_snapshots/",
+  "tmp/arg0/",
+  "thread-writer-locks/",
+  "state_5.sqlite",
+  "logs_2.sqlite",
+  "thread_history_1.sqlite",
+  "goals_1.sqlite",
+  "queue_1.sqlite",
+  "memories_1.sqlite",
+]
+
+# ---- `codex exec --json` stdout schema (codex-rs/exec/src/exec_events.rs) ----
+
+[events.jsonl]
+discriminator = "type"
+item_discriminator = "item.type"
+item_id_format = "item_{n}"
+usage_semantics = "turn.completed.usage is the thread total (ThreadTokenUsage.total) at turn end, not a per-request delta; one exec run = one turn"
+reasoning_note = "reasoning items are dropped when the summary is empty; gpt-6.1-sol default_reasoning_summary is none"
+command_note = "command_execution.command is still a string (exec_events.rs). shell_command aliases UnifiedExec, so the launcher is still unified exec and the string is still the bash -lc wrapper the access parser unwraps. Rollout CommandExecution.command stays an argv array"
+file_change_note = "file_change carries no patch text: no diff, no content, no move_path; it is emitted only as item.completed"
+
+[events.jsonl.event_fields]
+"thread.started" = ["thread_id"]
+"turn.started" = []
+"turn.completed" = ["usage"]
+"turn.failed" = ["error.message"]
+"item.started" = ["item"]
+"item.updated" = ["item"]
+"item.completed" = ["item"]
+"error" = ["message"]
+
+[events.jsonl.usage_fields]
+fields = ["input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens"]
+
+[events.jsonl.item_fields]
+agent_message = ["id", "text"]
+reasoning = ["id", "text"]
+command_execution = ["id", "command", "aggregated_output", "exit_code", "status"]
+file_change = ["id", "changes[].path", "changes[].kind", "status"]
+mcp_tool_call = ["id", "server", "tool", "arguments", "result.content", "result.structured_content", "result._meta", "error.message", "status"]
+collab_tool_call = ["id", "tool", "sender_thread_id", "receiver_thread_ids", "prompt", "agents_states", "status"]
+web_search = ["id", "query", "action", "results"]
+todo_list = ["id", "items[].text", "items[].completed"]
+error = ["id", "message"]
+
+[events.jsonl.enums]
+command_execution_status = ["in_progress", "completed", "failed", "declined"]
+file_change_kind = ["add", "delete", "update"]
+file_change_status = ["in_progress", "completed", "failed"]
+mcp_tool_call_status = ["in_progress", "completed", "failed"]
+collab_tool = ["spawn_agent", "send_input", "wait", "close_agent"]
+
+# ---- rollout file schema (codex-rs/history, codex-rs/rollout/src/policy.rs) ----
+
+[rollout]
+line_fields = ["timestamp", "ordinal", "type", "payload"]
+# Seen live on 0.159.3 response_item message/custom_tool_call_output lines:
+# {"client_authored": bool, "mcp_attribution": {"status": ...}}.
+optional_line_fields = ["metadata"]
+line_types = ["session_meta", "response_item", "event_msg", "turn_context", "world_state", "token_usage_record", "compacted", "inter_agent_communication", "inter_agent_communication_metadata", "security_risk_score", "retained_context", "realtime_item"]
+history_mode = "paginated"
+full_patch_source = "event_msg item_completed with item.type=FileChange: changes.{path}.unified_diff (update) or .content (add/delete)"
+full_command_source = "event_msg item_completed with item.type=CommandExecution: command (argv), aggregated_output, exit_code, duration, formatted_output"
+code_cell_source = "response_item custom_tool_call name=exec: input is the JS cell source; outputs in custom_tool_call_output"
+per_request_usage_source = "event_msg token_count info.last_token_usage, and token_usage_record.usage keyed by response_id"
+not_persisted = ["exec_command_begin", "exec_command_end", "exec_command_output_delta", "patch_apply_begin", "patch_apply_end", "turn_diff", "item_started"]
+
+[rollout.payload_fields]
+session_meta = ["id", "session_id", "cwd", "cli_version", "originator", "source", "model_provider", "base_instructions", "history_mode", "memory_mode", "multi_agent_version", "git.commit_hash", "git.repository_url"]
+turn_context = ["cwd", "model", "effort", "approval_policy", "sandbox_policy", "permission_profile", "current_date", "collaboration_mode", "multi_agent_version"]
+token_usage_record = ["thread_id", "turn_id", "session_id", "root_turn_id", "response_id", "usage", "turn_token_usage", "thread_token_usage"]
+token_usage = ["input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens"]
+
+[rollout.response_item_fields]
+message = ["id", "role", "content", "phase"]
+reasoning = ["id", "summary", "content", "encrypted_content"]
+function_call = ["id", "name", "namespace", "arguments", "call_id"]
+function_call_output = ["id", "call_id", "name", "namespace", "output"]
+custom_tool_call = ["id", "status", "call_id", "name", "namespace", "input"]
+custom_tool_call_output = ["id", "call_id", "name", "output"]
+
+[rollout.event_msg_fields]
+task_started = ["turn_id", "trace_id", "started_at", "model_context_window", "collaboration_mode_kind"]
+task_complete = ["turn_id", "last_agent_message", "error", "started_at", "completed_at"]
+token_count = ["info.total_token_usage", "info.last_token_usage", "info.model_context_window", "rate_limits"]
+item_completed = ["thread_id", "turn_id", "item", "started_at_ms", "completed_at_ms"]
+
+# item_completed.item uses a PascalCase "type" tag (e.g. "UserMessage", "CommandExecution").
+[rollout.turn_item_fields]
+UserMessage = ["id", "content"]
+AgentMessage = ["id", "content", "phase", "memory_citation"]
+Reasoning = ["id", "summary_text", "raw_content"]
+CommandExecution = ["id", "command", "cwd", "parsed_cmd", "source", "process_id", "script_path", "plugin_id", "interaction_input", "status", "stdout", "stderr", "aggregated_output", "exit_code", "duration", "formatted_output"]
+FileChange = ["id", "changes", "status", "auto_approved", "stdout", "stderr"]
+FunctionCallOutput = ["id", "name", "namespace", "output"]
+
+[rollout.file_change_variants]
+add = ["type", "content"]
+delete = ["type", "content"]
+update = ["type", "unified_diff", "move_path"]

@@ -1,0 +1,32 @@
+diff --git a/httpcore/_async/connection_pool.py b/httpcore/_async/connection_pool.py
+index 96e973d..e32f753 100644
+--- a/httpcore/_async/connection_pool.py
++++ b/httpcore/_async/connection_pool.py
+@@ -321,7 +321,10 @@ class AsyncConnectionPool(AsyncRequestInterface):
+                 # log: "reusing existing connection"
+                 connection = available_connections[0]
+                 pool_request.assign_to_connection(connection)
+-            elif len(self._connections) < self._max_connections:
++            elif (
++                len([c for c in self._connections if not c.is_idle()])
++                < self._max_connections
++            ):
+                 # log: "creating new connection"
+                 connection = self.create_connection(origin)
+                 self._connections.append(connection)
+diff --git a/httpcore/_sync/connection_pool.py b/httpcore/_sync/connection_pool.py
+index 9ccfa53..f9d4406 100644
+--- a/httpcore/_sync/connection_pool.py
++++ b/httpcore/_sync/connection_pool.py
+@@ -321,7 +321,10 @@ class ConnectionPool(RequestInterface):
+                 # log: "reusing existing connection"
+                 connection = available_connections[0]
+                 pool_request.assign_to_connection(connection)
+-            elif len(self._connections) < self._max_connections:
++            elif (
++                len([c for c in self._connections if not c.is_idle()])
++                < self._max_connections
++            ):
+                 # log: "creating new connection"
+                 connection = self.create_connection(origin)
+                 self._connections.append(connection)

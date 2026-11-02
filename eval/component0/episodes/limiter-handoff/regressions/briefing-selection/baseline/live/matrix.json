@@ -1,0 +1,164 @@
+{
+  "agent": "codex",
+  "codex_version": "0.159.3",
+  "cumulative_tokens": 1342523,
+  "matrix_token_cap": 4000000,
+  "model": "gpt-6.1-sol",
+  "run_id": "live-v2-contextd",
+  "started_utc": "2026-10-02T07:50:43Z",
+  "stopped": null,
+  "token_cap": 1000000,
+  "trials": {
+    "contextd-r1": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T07:52:42Z",
+      "score": {
+        "failure_tag": "placement",
+        "forbidden_count": 0,
+        "repeated_work_calls": 0,
+        "solved": false,
+        "turns_to_frontier": null
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 48609
+    },
+    "contextd-r2": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T07:54:48Z",
+      "score": {
+        "failure_tag": "placement",
+        "forbidden_count": 0,
+        "repeated_work_calls": 0,
+        "solved": false,
+        "turns_to_frontier": null
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 48661
+    },
+    "contextd-r3": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T07:55:28Z",
+      "score": {
+        "failure_tag": "placement",
+        "forbidden_count": 0,
+        "repeated_work_calls": 0,
+        "solved": false,
+        "turns_to_frontier": null
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 50085
+    },
+    "contextd-r4": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T07:59:02Z",
+      "score": {
+        "failure_tag": "placement",
+        "forbidden_count": 0,
+        "repeated_work_calls": 0,
+        "solved": false,
+        "turns_to_frontier": null
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 69696
+    },
+    "contextd-r5": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T08:01:06Z",
+      "score": {
+        "failure_tag": "placement",
+        "forbidden_count": 0,
+        "repeated_work_calls": 0,
+        "solved": false,
+        "turns_to_frontier": null
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 58837
+    },
+    "none-r1": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T07:52:04Z",
+      "score": {
+        "failure_tag": "ok",
+        "forbidden_count": 0,
+        "repeated_work_calls": 0,
+        "solved": true,
+        "turns_to_frontier": 10
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 181798
+    },
+    "none-r2": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T07:54:06Z",
+      "score": {
+        "failure_tag": "behaviour",
+        "forbidden_count": 0,
+        "repeated_work_calls": 1,
+        "solved": true,
+        "turns_to_frontier": 12
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 239077
+    },
+    "none-r3": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T07:56:49Z",
+      "score": {
+        "failure_tag": "ok",
+        "forbidden_count": 0,
+        "repeated_work_calls": 0,
+        "solved": true,
+        "turns_to_frontier": 10
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 216870
+    },
+    "none-r4": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T07:58:16Z",
+      "score": {
+        "failure_tag": "ok",
+        "forbidden_count": 0,
+        "repeated_work_calls": 0,
+        "solved": true,
+        "turns_to_frontier": 10
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 231299
+    },
+    "none-r5": {
+      "errors": [],
+      "exit_code": 0,
+      "finished_utc": "2026-10-02T08:00:27Z",
+      "score": {
+        "failure_tag": "ok",
+        "forbidden_count": 0,
+        "repeated_work_calls": 0,
+        "solved": true,
+        "turns_to_frontier": 10
+      },
+      "status": "complete",
+      "terminated": null,
+      "tokens": 197591
+    }
+  },
+  "updated_utc": "2026-10-02T08:01:06Z"
+}

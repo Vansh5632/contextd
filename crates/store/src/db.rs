@@ -1,3 +1,6 @@
+use contextd_core::claim::{
+    Claim, ClaimConfidence, ClaimKind, ClaimOrigin, ClaimStatus, Projection, Task, TaskStatus,
+};
 use contextd_core::config::AppConfig;
 use contextd_core::event::{EventSource, Intent, ProcessedEvent, RawEvent};
 use rusqlite::{Connection, Result};
@@ -50,7 +53,49 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
     add_missing_columns(conn)?;
     create_indices(conn)?;
+    migrate_working_state(conn)?;
 
+    Ok(())
+}
+
+fn migrate_working_state(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL CHECK (status IN ('active', 'done')),
+            opened_by_event_id TEXT NOT NULL,
+            closed_by_event_id TEXT,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        )",
+        (),
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS claims (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('current', 'superseded')),
+            confidence TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            text TEXT NOT NULL,
+            outcome INTEGER,
+            artifact_refs TEXT NOT NULL DEFAULT '[]',
+            evidence_ids TEXT NOT NULL,
+            supersedes TEXT,
+            asserted_by_event_id TEXT NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        )",
+        (),
+    )?;
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_current_slot
+            ON claims(task_id, kind, subject)
+            WHERE status = 'current'
+              AND kind IN ('intent', 'next_action', 'reality')",
+        (),
+    )?;
     Ok(())
 }
 
@@ -263,6 +308,16 @@ pub fn get_prunable_events(
          WHERE timestamp_ms < ?1
            AND score < ?2
            AND (memory_type IS NULL OR memory_type = 'episodic')
+           AND source != 'claim'
+           AND id NOT IN (
+               SELECT opened_by_event_id FROM tasks
+               WHERE status = 'active'
+           )
+           AND id NOT IN (
+               SELECT json_each.value
+               FROM claims, json_each(claims.evidence_ids)
+               WHERE claims.status = 'current'
+           )
          ORDER BY timestamp_ms ASC
          LIMIT ?3"
     );
@@ -430,6 +485,155 @@ pub fn get_event_by_id(conn: &Connection, id: &str) -> Result<Option<ProcessedEv
 
     Ok(Some(processed_from_row(row)?))
 }
+
+/// Append an authored claim event. Same table as every other observation.
+pub fn insert_claim_event(conn: &Connection, event: &ProcessedEvent) -> Result<()> {
+    insert_event(conn, event)
+}
+
+/// Shell and claim events in fold order. File, git, and proc noise is skipped.
+pub fn get_fold_events(conn: &Connection) -> Result<Vec<RawEvent>> {
+    let mut stmt = conn.prepare(&format!(
+        "{EVENT_SELECT}
+         WHERE source IN ('shell', 'claim')
+         ORDER BY timestamp_ms ASC, id ASC"
+    ))?;
+    let rows = stmt.query_map([], processed_from_row)?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row?.raw);
+    }
+    Ok(events)
+}
+
+/// Replace the materialized view with a freshly folded projection.
+pub fn replace_projection(conn: &Connection, projection: &Projection) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM claims", [])?;
+    tx.execute("DELETE FROM tasks", [])?;
+
+    let mut insert_task = tx.prepare(
+        "INSERT INTO tasks
+            (id, status, opened_by_event_id, closed_by_event_id, created_at_ms, updated_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
+    for task in &projection.tasks {
+        insert_task.execute(rusqlite::params![
+            task.id,
+            task.status.as_str(),
+            task.opened_by_event_id,
+            task.closed_by_event_id,
+            task.created_at_ms,
+            task.updated_at_ms,
+        ])?;
+    }
+    drop(insert_task);
+
+    let mut insert_claim = tx.prepare(
+        "INSERT INTO claims
+            (id, task_id, kind, subject, status, confidence, origin, text, outcome,
+             artifact_refs, evidence_ids, supersedes, asserted_by_event_id, updated_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+    )?;
+    for claim in &projection.claims {
+        insert_claim.execute(rusqlite::params![
+            claim.id,
+            claim.task_id,
+            claim.kind.as_str(),
+            claim.subject,
+            claim.status.as_str(),
+            claim.confidence.as_str(),
+            claim.origin.as_str(),
+            claim.text,
+            claim.outcome,
+            serde_json::to_string(&claim.artifact_refs).unwrap_or_else(|_| "[]".to_string()),
+            serde_json::to_string(&claim.evidence_ids).unwrap_or_else(|_| "[]".to_string()),
+            claim.supersedes,
+            claim.asserted_by_event_id,
+            claim.updated_at_ms,
+        ])?;
+    }
+    drop(insert_claim);
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn load_projection(conn: &Connection) -> Result<Projection> {
+    let mut tasks = Vec::new();
+    let mut stmt = conn.prepare(
+        "SELECT id, status, opened_by_event_id, closed_by_event_id, created_at_ms, updated_at_ms
+         FROM tasks
+         ORDER BY created_at_ms ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Task {
+            id: row.get(0)?,
+            status: parse_task_status(row.get::<_, String>(1)?),
+            opened_by_event_id: row.get(2)?,
+            closed_by_event_id: row.get(3)?,
+            created_at_ms: row.get::<_, i64>(4)? as u64,
+            updated_at_ms: row.get::<_, i64>(5)? as u64,
+        })
+    })?;
+    for row in rows {
+        tasks.push(row?);
+    }
+
+    let mut claims = Vec::new();
+    let mut stmt = conn.prepare(
+        "SELECT id, task_id, kind, subject, status, confidence, origin, text, outcome,
+                artifact_refs, evidence_ids, supersedes, asserted_by_event_id, updated_at_ms
+         FROM claims
+         ORDER BY updated_at_ms ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Claim {
+            id: row.get(0)?,
+            task_id: row.get(1)?,
+            kind: parse_kind(row.get::<_, String>(2)?),
+            subject: row.get(3)?,
+            status: parse_status(row.get::<_, String>(4)?),
+            confidence: parse_confidence(row.get::<_, String>(5)?),
+            origin: parse_origin(row.get::<_, String>(6)?),
+            text: row.get(7)?,
+            outcome: row.get(8)?,
+            artifact_refs: parse_json_vec(row.get::<_, String>(9)?),
+            evidence_ids: parse_json_vec(row.get::<_, String>(10)?),
+            supersedes: row.get(11)?,
+            asserted_by_event_id: row.get(12)?,
+            updated_at_ms: row.get::<_, i64>(13)? as u64,
+        })
+    })?;
+    for row in rows {
+        claims.push(row?);
+    }
+
+    Ok(Projection { tasks, claims })
+}
+
+fn parse_json_vec(raw: String) -> Vec<String> {
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn parse_kind(raw: String) -> ClaimKind {
+    ClaimKind::parse(&raw).unwrap_or(ClaimKind::Unknown)
+}
+
+fn parse_status(raw: String) -> ClaimStatus {
+    ClaimStatus::parse(&raw).unwrap_or(ClaimStatus::Superseded)
+}
+
+fn parse_confidence(raw: String) -> ClaimConfidence {
+    ClaimConfidence::parse(&raw).unwrap_or(ClaimConfidence::Hypothesis)
+}
+
+fn parse_origin(raw: String) -> ClaimOrigin {
+    ClaimOrigin::parse(&raw).unwrap_or(ClaimOrigin::Agent)
+}
+
+fn parse_task_status(raw: String) -> TaskStatus {
+    TaskStatus::parse(&raw).unwrap_or(TaskStatus::Active)
+}
 // ==========================================
 // TESTS
 // ==========================================
@@ -460,5 +664,102 @@ mod tests {
             table_exists,
             "The events table should have been created in the database!"
         );
+    }
+
+    fn sample_projection() -> Projection {
+        Projection {
+            tasks: vec![Task {
+                id: "t_1".into(),
+                status: TaskStatus::Active,
+                opened_by_event_id: "evt-fail".into(),
+                closed_by_event_id: None,
+                created_at_ms: 1_000,
+                updated_at_ms: 2_000,
+            }],
+            claims: vec![Claim {
+                id: "c_1".into(),
+                task_id: "t_1".into(),
+                kind: ClaimKind::Reality,
+                subject: "cwd\npytest".into(),
+                status: ClaimStatus::Current,
+                confidence: ClaimConfidence::Observed,
+                origin: ClaimOrigin::Projector,
+                text: "pytest exited 1".into(),
+                outcome: Some(1),
+                artifact_refs: vec!["tests/test_pool_counts.py".into()],
+                evidence_ids: vec!["evt-fail".into()],
+                supersedes: None,
+                asserted_by_event_id: "evt-fail".into(),
+                updated_at_ms: 1_000,
+            }],
+        }
+    }
+
+    #[test]
+    fn projection_round_trips() {
+        let conn = init_db(&AppConfig {
+            db_path: PathBuf::from(":memory:"),
+            ..Default::default()
+        })
+        .unwrap();
+        let original = sample_projection();
+        replace_projection(&conn, &original).unwrap();
+        let loaded = load_projection(&conn).unwrap();
+        assert_eq!(loaded.tasks, original.tasks);
+        assert_eq!(loaded.claims, original.claims);
+    }
+
+    #[test]
+    fn pruner_skips_claim_events_and_current_evidence() {
+        let conn = init_db(&AppConfig {
+            db_path: PathBuf::from(":memory:"),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let mut claim = ProcessedEvent::new(
+            RawEvent {
+                id: "claim-evt".into(),
+                timestamp_ms: 1_000,
+                source: EventSource::Claim,
+                payload: serde_json::json!({"op": "assert"}),
+            },
+            0.1,
+        );
+        claim.memory_type = Some("episodic".into());
+        insert_event(&conn, &claim).unwrap();
+
+        let mut evidence = ProcessedEvent::new(
+            RawEvent {
+                id: "evt-fail".into(),
+                timestamp_ms: 1_000,
+                source: EventSource::Shell,
+                payload: serde_json::json!({"command": "pytest", "exit_code": 1}),
+            },
+            0.1,
+        );
+        evidence.memory_type = Some("episodic".into());
+        insert_event(&conn, &evidence).unwrap();
+
+        let mut noise = ProcessedEvent::new(
+            RawEvent {
+                id: "noise".into(),
+                timestamp_ms: 1_000,
+                source: EventSource::Shell,
+                payload: serde_json::json!({"command": "ls"}),
+            },
+            0.1,
+        );
+        noise.memory_type = Some("episodic".into());
+        insert_event(&conn, &noise).unwrap();
+
+        replace_projection(&conn, &sample_projection()).unwrap();
+
+        let ids: Vec<String> = get_prunable_events(&conn, 5_000, 0.5, 100)
+            .unwrap()
+            .into_iter()
+            .map(|event| event.raw.id)
+            .collect();
+        assert_eq!(ids, vec!["noise".to_string()]);
     }
 }

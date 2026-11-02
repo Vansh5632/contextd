@@ -1,0 +1,51 @@
+# Session B: unrelated Host header default-port fix. Its edit becomes the followup commit.
+# Steps run in order in the offline scorer image against the import commit.
+session: B
+steps:
+  - note: >-
+      Different problem today: a request to https://www.example.com:80/ goes out with
+      Host: www.example.com instead of www.example.com:80. Finding where the Host header
+      gets filled in.
+  - run: grep -rn "b\"host\"\|b\"Host\"" httpcore/
+  - run: sed -n 1,141p httpcore/_models.py
+  - note: >-
+      include_request_headers adds Host when the caller did not set one. The port check is
+      url.port <= default_port, so on https any port below 443 is treated as the default
+      and dropped from the header. That should be ==.
+  - run: |
+      python - <<'EOF'
+      import httpcore
+      from httpcore._models import include_request_headers
+
+      for url in [
+          "https://www.example.com/",
+          "https://www.example.com:443/",
+          "https://www.example.com:80/",
+          "https://www.example.com:8443/",
+          "http://www.example.com:80/",
+          "http://www.example.com:8080/",
+      ]:
+          print(url, include_request_headers([], url=httpcore.URL(url), content=None))
+      EOF
+  - note: >-
+      Confirmed: https on port 80 loses the port, 8443 keeps it. Checking how URL parses
+      the port and the default ports table before changing anything.
+  - run: sed -n 142,316p httpcore/_models.py
+  - note: >-
+      URL.port stays None when no port is given, so None or equal-to-default is the right
+      rule. Checking the HTTP/1.1 connection does not rewrite Host on its own when
+      sending headers.
+  - run: sed -n 76,237p httpcore/_sync/http11.py
+  - run: sed -n 140,170p httpcore/_async/http11.py
+  - note: >-
+      Neither connection touches Host; they send request.headers as given. The fix stays
+      in _models.py. Looking at the existing model tests for a place to add a case.
+  - run: sed -n 1,100p tests/test_models.py
+  - run: sed -n 100,189p tests/test_models.py
+  - apply: patches/session_b_fix.patch
+  - run: git diff
+  - run: python -m pytest -q -p no:cacheprovider tests/test_models.py
+  - run: python -m pytest -q -p no:cacheprovider tests/_sync/test_http11.py tests/_async/test_http11.py
+  - note: >-
+      Host header fix done: == instead of <=, plus
+      test_request_host_header_with_non_default_port. Model and HTTP/1.1 tests pass.

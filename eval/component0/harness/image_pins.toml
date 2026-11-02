@@ -1,0 +1,26 @@
+# Local image IDs pinned for trials. Rewrite: `python -m harness.images pin`.
+# images.model id is the ollama model digest, not a Docker image id.
+
+[images.agent]
+name = "contextd-c0-agent:v0"
+id = "sha256:d51cf876163ca2b26aa97861855780acce4254234649adab7d2ecfff7efa6580"
+
+[images.scorer]
+name = "contextd-c0-scorer:v0"
+id = "sha256:1fee64413fff5cadbb528050aa7829bc802ebb013b517af4ab5dcea5dcd2a7a4"
+
+[images.egress]
+name = "contextd-c0-egress:v0"
+id = "sha256:de6801f2858f987c9c7c5031b5de996e48aeed2f89f2aefa1ff6176e3e1582cd"
+
+[images.replay]
+name = "contextd-c0-replay:v0"
+id = "sha256:6dd6ed88d4d699d5a78fb12643ac675a99ac7db942799b4bbc7b58ada6fda826"
+
+[images.ollama]
+name = "ollama/ollama@sha256:2a6e883b917fc543389599dae79918f5cac9e1438890506982f44aa4f5625d01"
+id = "sha256:2a6e883b917fc543389599dae79918f5cac9e1438890506982f44aa4f5625d01"
+
+[images.model]
+name = "nomic-embed-text"
+id = "sha256:0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f"

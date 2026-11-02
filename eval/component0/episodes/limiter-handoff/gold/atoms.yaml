@@ -1,0 +1,109 @@
+# Gold claims for the limiter-handoff packets. Consumed by harness/packet_score.py.
+#
+# `match` is a list of case-insensitive Python regexes; an atom is present in a unit
+# (packet paragraph or raw history unit) if any regex matches. A unit that matches a
+# `stale` atom counts as stale-as-current unless it also matches superseded_marker.
+# `[^.\n]` spans keep a match inside one sentence. Recall roles: required, constraint,
+# ruled_out, next_step. tests/test_packet_score.py pins the expected matches.
+version: 1
+superseded_marker: '\b(reject\w*|ruled out|superseded|not pursu\w*|do not pursue|dropped|abandon\w*|out of scope)\b'
+atoms:
+  - id: finding_idle_not_counted
+    role: required
+    claim: >-
+      With max_connections=2 the pool opens a third connection while the first two are
+      held idle, because idle connections are not counted toward the cap.
+    match:
+      - '\bidle\b[^.\n]{0,100}\b(not|never)\b[^.\n]{0,20}\bcount'
+      - '\bcount\w*\s+only\s+(the\s+)?(connections\s+that\s+are\s+not\s+idle|non-?idle)'
+      - '\bonly\s+count\w*\s+(the\s+)?(connections\s+that\s+are\s+not\s+idle|non-?idle)'
+      - '\bidle\b[^.\n]{0,60}\b(brand new|new|third|fresh)\s+connection\b[^.\n]{0,40}\b(3|three)\s+(held|connections)'
+      - '\b(new|third)\s+connection\b[^.\n]{0,60}\b(while|although|even though)\b[^.\n]{0,40}\bidle\b'
+
+  - id: decision_idle_counts
+    role: required
+    claim: >-
+      Every connection the pool holds, idle keepalive connections included, counts toward
+      max_connections; at the cap a new origin reuses or evicts an idle connection.
+    match:
+      - '\b(every|all|each)\s+connections?\b[^.\n]{0,80}\bidle\b[^.\n]{0,60}\bcounts?\s+(toward|towards|against)\b'
+      - '\bidle\b(?:(?!\b(?:not|never|no)\b|n''t\b)[^.\n]){0,80}\bcounts?\s+(toward|towards|against)\s+(the\s+)?(max_connections|cap|limit)\b'
+      - '\b(reuse|evict)\w*\s+(or\s+(reuse|evict)\w*\s+)?an?\s+idle\s+connection\b[^.\n]{0,20}\b(instead\s+of|rather\s+than)\b'
+
+  - id: constraint_signatures
+    role: constraint
+    claim: >-
+      The public signatures and defaults of ConnectionPool/AsyncConnectionPool.__init__ and
+      handle_request / handle_async_request stay unchanged.
+    match:
+      - '\b(keep|preserve|leave)\b[^.\n]{0,40}\b(public\s+)?(signatures?|constructors?)\b'
+      - '\b(signatures?|constructors?)\b[^.\n]{0,80}\b(unchanged|stays?\s+the\s+same|must\s+not\s+change|frozen)\b'
+      - '\bhandle_(async_)?request\b[^.\n]{0,60}\b(unchanged|stays?\s+the\s+same|must\s+not\s+change)\b'
+
+  - id: constraint_no_new_deps
+    role: constraint
+    claim: No new dependencies.
+    match:
+      - '\bno\s+(new|extra|additional)\s+(runtime\s+)?(dependenc\w*|deps|packages|requirements)\b'
+      - '\b(without|do\s+not|don''t|never)\s+add\w*\s+(any\s+)?(new\s+)?(dependenc\w*|deps|packages)\b'
+
+  - id: ruled_out_mock_backend
+    role: ruled_out
+    claim: The mock network backend is not the cause.
+    match:
+      - '\bmock\w*(\s+network)?\s+backend\b[^.\n]{0,60}\b(is|was|looked|looks|seems)\s+(fine|ok|okay|innocent|correct|not\s+the\s+(cause|problem|culprit))\b'
+      - '\b(ruled\s+out|not\s+the\s+cause|not\s+the\s+culprit)\b:?[^.\n]{0,20}\bmock\w*(\s+network)?\s+backend\b'
+      - '\bmock\w*(\s+network)?\s+backend\b[^.\n]{0,60}\b(ruled\s+out|not\s+the\s+cause)\b'
+
+  - id: ruled_out_lock
+    role: ruled_out
+    claim: >-
+      The pool lock and the synchronization primitives are not the cause; the
+      over-creation reproduces single-threaded.
+    match:
+      - '\b(lock|locks|locking|synchronization)\b[^.\n]{0,60}\b(ruled\s+out|not\s+the\s+cause|not\s+involved)\b'
+      - '\b(ruled\s+out|not\s+the\s+cause)\b:?[^.\n]{0,40}\b(lock|locks|locking|synchronization)\b'
+
+  - id: stale_redis_counter
+    role: stale
+    claim: >-
+      An earlier idea proposed a shared admission counter in Redis so processes share one
+      cap; it was rejected (single-process library, network dependency out of scope).
+    match:
+      - '\bredis\b'
+      - '\b(shared|global|cross-process)\s+admission\s+counter\b'
+
+  - id: unresolved_keepalive_comprehension
+    role: unresolved
+    claim: >-
+      The keepalive cleanup loop counts all connections with len([connection.is_idle() ...]);
+      noticed, deliberately left alone, out of scope.
+    match:
+      - 'len\(\[connection\.is_idle\(\) for connection in self\._connections\]\)'
+      - '\bkeep-?alive\s+cleanup\b[^\n]{0,160}\b(out\s+of\s+scope|left\s+alone|not\s+touch\w*|do\s+not\s+touch)\b'
+
+  - id: next_step_create_branch
+    role: next_step
+    claim: >-
+      Fix the create-new-connection branch in _assign_requests_to_connections in
+      httpcore/_async/connection_pool.py, then regenerate the sync file with scripts/unasync.py.
+    match:
+      - '\bcreate[- ]new[- ]connection\s+branch\b[^\n]{0,80}_assign_requests_to_connections\b[^\n]{0,160}\bunasync\b'
+      - '_assign_requests_to_connections\b[^\n]{0,40}_async/connection_pool\.py\b[^\n]{0,120}\bunasync\b'
+
+  - id: optional_host_header_fix
+    role: optional
+    claim: >-
+      The Host header default-port check in include_request_headers was fixed (== instead
+      of <=) in a separate session.
+    match:
+      - '==\s+instead\s+of\s+<='
+      - '\bhost\s+header\s+fix\w*\s+(done|applied|landed)\b'
+
+  - id: optional_exact_counts
+    role: optional
+    claim: The visible test reports 3 connections against max_connections=2.
+    match:
+      - 'count 3 diverged from 2'
+      - '\bmax_connections\s*=\s*2\b[^.\n]{0,60}\b(3|three)\s+(connections|held)\b'
+      - '\b(3|three)\s+(connections\s+)?held\s+with\s+max_connections\s*=\s*2\b'

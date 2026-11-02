@@ -1,0 +1,93 @@
+# Session A: interrupted investigation of the pool count failure. Changes no repo files.
+# Steps run in order in the offline scorer image against the import commit.
+session: A
+steps:
+  - note: >-
+      Picking up the pool count failure. Running the visible test first to see the
+      actual numbers.
+  - run: python -m pytest -q -p no:cacheprovider tests/test_pool_counts.py
+  - note: >-
+      Fails as reported: with max_connections=2 the pool holds 3 connections while the
+      third origin streams. Requests to a and b already finished, so those two should be
+      sitting idle in the pool.
+  - run: sed -n 43,112p httpcore/_sync/connection_pool.py
+  - run: sed -n 48,62p httpcore/_async/connection_pool.py
+  - run: grep -n "def handle_request\|def handle_async_request" httpcore/_sync/connection_pool.py httpcore/_async/connection_pool.py
+  - run: sed -n 199,256p httpcore/_sync/connection_pool.py
+  - note: >-
+      Constraint for whatever fix comes out of this: ConnectionPool.__init__ and
+      AsyncConnectionPool.__init__ keep their public signature and defaults
+      (max_connections=10, max_keepalive_connections=None, ...), and handle_request /
+      handle_async_request stay unchanged. No new dependencies either.
+  - note: >-
+      First suspect: the mock network backend. If MockBackend hands out streams the pool
+      cannot reuse, every request would get a fresh connection.
+  - run: sed -n 24,84p httpcore/_backends/mock.py
+  - run: |
+      python - <<'EOF'
+      import httpcore
+
+      backend = httpcore.MockBackend(
+          [b"HTTP/1.1 200 OK\r\n", b"Content-Length: 2\r\n", b"\r\n", b"ok"]
+      )
+      stream = backend.connect_tcp("a.example.com", 443)
+      print(stream.read(64), stream.read(64))
+      print(backend.connect_tcp("b.example.com", 443).read(64))
+      with httpcore.ConnectionPool(max_connections=2, network_backend=backend) as pool:
+          pool.request("GET", "https://a.example.com/")
+          print(pool.connections)
+          pool.request("GET", "https://b.example.com/")
+          print(pool.connections)
+      EOF
+  - note: >-
+      Mock backend is fine: every connect_tcp gets a fresh stream over its own copy of the
+      buffer, and a finished request leaves its connection IDLE in the pool as it should.
+      Ruled out as the cause.
+  - note: >-
+      Next suspect: the pool lock or the primitives in _synchronization.py losing a
+      wakeup, so two requests both see room for a new connection.
+  - run: sed -n 232,254p httpcore/_synchronization.py
+  - run: |
+      python - <<'EOF'
+      import httpcore
+
+      backend = httpcore.MockBackend(
+          [b"HTTP/1.1 200 OK\r\n", b"Content-Length: 2\r\n", b"\r\n", b"ok"]
+      )
+      with httpcore.ConnectionPool(max_connections=2, network_backend=backend) as pool:
+          pool.request("GET", "https://a.example.com/")
+          pool.request("GET", "https://b.example.com/")
+          with pool.stream("GET", "https://c.example.com/") as response:
+              for conn in pool.connections:
+                  print(conn)
+              response.read()
+      EOF
+  - note: >-
+      Single thread, no concurrency, and it still over-creates: a and b are IDLE, c gets a
+      brand new connection, 3 held with max_connections=2. Nothing can lose a wakeup here,
+      so the lock and synchronization are ruled out.
+  - run: sed -n 305,335p httpcore/_async/connection_pool.py
+  - note: >-
+      The create-new-connection branch only counts connections that are not idle, so idle
+      keepalive connections never count toward max_connections and the idle-eviction
+      branch below it is never reached.
+  - note: >-
+      Idea: a shared admission counter in Redis so every process using the client shares
+      one cap. The create branch would INCR before opening a connection and DECR on close.
+  - note: >-
+      Rejected the Redis counter. httpcore is a single-process client library, the cap is
+      per pool, and a network service dependency is out of scope for a pool fix.
+  - note: >-
+      Decision: every connection the pool holds, idle keepalive ones included, counts
+      toward max_connections. At the cap a request for a new origin has to reuse or evict
+      an idle connection rather than exceed the cap.
+  - run: sed -n 283,298p httpcore/_async/connection_pool.py
+  - note: >-
+      Also noticed: the keepalive cleanup loop uses len([connection.is_idle() for
+      connection in self._connections]), which counts every connection, not only idle
+      ones. Odd, but not this bug. Not touching keepalive cleanup or
+      _max_keepalive_connections; out of scope.
+  - note: >-
+      Next step, not started: fix the create-new-connection branch in
+      _assign_requests_to_connections in httpcore/_async/connection_pool.py, then
+      regenerate the sync file with scripts/unasync.py and rerun the visible test.

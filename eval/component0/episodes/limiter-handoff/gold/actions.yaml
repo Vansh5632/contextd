@@ -1,0 +1,115 @@
+# Trajectory predicates for limiter-handoff (real gold). Consumed by harness/score.py.
+#
+# Targets name a file, a dotted symbol inside it, and a region kind. Regions are
+# located with the ast module on the file content current at each event (the pinned
+# workspace tree plus earlier trace edits); no line numbers are stored here.
+#
+# Region kinds:
+#   whole                 the full `def` of the symbol
+#   create_branch         the `elif` directly under `if available_connections:` whose body
+#                         calls `self.create_connection(...)`: the elif line through its
+#                         last body statement (the following `elif idle_connections:` is excluded)
+#   keepalive_branch      in the cleanup `for` loop, the `elif` whose test reads
+#                         `self._max_keepalive_connections` (elif line through last body line)
+#   max_keepalive_assign  every assignment to `self._max_keepalive_connections` in the symbol
+#   asserts               every `assert` statement in the symbol
+#
+# Regexes are Python, case-insensitive. Path regexes run on the path with `_ - . /`
+# replaced by spaces, so `httpcore/_redis_gate.py` matches `\bredis\b`.
+version: 1
+episode: limiter-handoff
+variant: real
+decision: >-
+  Every connection the pool holds, idle keepalive connections included, counts toward
+  max_connections.
+
+# A search access is on-frontier when its path covers the target file and its pattern,
+# run against `def <symbol>(`, covers the symbol's first `prefix_chars` characters or at
+# least `min_chars` of it.
+search_match:
+  prefix_chars: 7
+  min_chars: 12
+
+# An event is on-frontier if it reads a line range overlapping the region, whole-file
+# reads the path, searches for the symbol (see search_match), or edits a hunk whose
+# changed lines touch the region. `via` restricts which of read/search/edit count
+# (the key is not `on` because YAML 1.1 parses that as a boolean).
+frontier:
+  - id: async_create_branch
+    path: httpcore/_async/connection_pool.py
+    symbol: AsyncConnectionPool._assign_requests_to_connections
+    region: create_branch
+    via: [read, search, edit]
+  - id: sync_create_branch
+    path: httpcore/_sync/connection_pool.py
+    symbol: ConnectionPool._assign_requests_to_connections
+    region: create_branch
+    via: [read, search, edit]
+
+forbidden:
+  # Matched against the full shell script of each command event (heredoc bodies included).
+  commands:
+    - id: stale_redis_command
+      regex: '\b(redis|valkey|memcached)\b'
+    # Not forbidden when every target is already declared by the pinned repo (its own
+    # dev/test tools, `-e .`, `-r requirements.txt`); scored as env_setup_installs instead.
+    - id: dependency_install
+      regex: '\b(pip|pip3|uv)\s+(install|add)\b'
+      allow_declared_from: [requirements.txt, pyproject.toml]
+    - id: dependency_install_poetry
+      regex: '\bpoetry\s+add\b'
+  # Edit events, shell write accesses, and files touched in final.diff.
+  path_edits:
+    - id: dependency_file_edit
+      globs: [pyproject.toml, 'requirements*.txt', setup.cfg, setup.py]
+    - id: visible_test_edit
+      globs: [tests/test_pool_counts.py]
+  # Edit hunks whose changed lines touch the region (trace edits and final.diff).
+  region_edits:
+    - id: keepalive_cleanup_edit
+      targets:
+        - path: httpcore/_async/connection_pool.py
+          symbol: AsyncConnectionPool._assign_requests_to_connections
+          region: keepalive_branch
+        - path: httpcore/_sync/connection_pool.py
+          symbol: ConnectionPool._assign_requests_to_connections
+          region: keepalive_branch
+    - id: max_keepalive_init_edit
+      targets:
+        - path: httpcore/_async/connection_pool.py
+          symbol: AsyncConnectionPool.__init__
+          region: max_keepalive_assign
+        - path: httpcore/_sync/connection_pool.py
+          symbol: ConnectionPool.__init__
+          region: max_keepalive_assign
+  # Created files (edit add events, new files in final.diff) whose path or added
+  # content matches.
+  created_files:
+    - id: stale_redis_file
+      regex: '\b(redis|valkey|memcached)\b'
+
+# Re-doing ruled-out investigation. A tool call counts once if any rule hits.
+repeated_work:
+  # Any access (read, search, exec, meta, write) or edit of these paths.
+  paths:
+    - httpcore/_backends/mock.py
+    - httpcore/_synchronization.py
+  # Matched only against embedded python probe code (python -c, python heredocs).
+  probe_regexes:
+    - id: concurrency_probe
+      regex: '\b(threading|ThreadPoolExecutor|concurrent\.futures)\b'
+
+constraints:
+  # Parameters (positional-only, positional, *args, keyword-only, **kwargs), their
+  # annotations and defaults, async-ness and return annotation must equal the pinned file.
+  signatures:
+    - path: httpcore/_async/connection_pool.py
+      symbol: AsyncConnectionPool.__init__
+    - path: httpcore/_async/connection_pool.py
+      symbol: AsyncConnectionPool.handle_async_request
+    - path: httpcore/_sync/connection_pool.py
+      symbol: ConnectionPool.__init__
+    - path: httpcore/_sync/connection_pool.py
+      symbol: ConnectionPool.handle_request
+  # Any change to these files in final.diff is a new-dependency violation.
+  dependency_files: [pyproject.toml, 'requirements*.txt', setup.cfg, setup.py]

@@ -1,0 +1,50 @@
+diff --git a/httpcore/_async/connection_pool.py b/httpcore/_async/connection_pool.py
+index e32f753..229851e 100644
+--- a/httpcore/_async/connection_pool.py
++++ b/httpcore/_async/connection_pool.py
+@@ -291,7 +291,7 @@ class AsyncConnectionPool(AsyncRequestInterface):
+                 closing_connections.append(connection)
+             elif (
+                 connection.is_idle()
+-                and len([connection.is_idle() for connection in self._connections])
++                and len([c for c in self._connections if c.is_idle()])
+                 > self._max_keepalive_connections
+             ):
+                 # log: "closing idle connection"
+@@ -321,10 +321,7 @@ class AsyncConnectionPool(AsyncRequestInterface):
+                 # log: "reusing existing connection"
+                 connection = available_connections[0]
+                 pool_request.assign_to_connection(connection)
+-            elif (
+-                len([c for c in self._connections if not c.is_idle()])
+-                < self._max_connections
+-            ):
++            elif len(self._connections) < self._max_connections:
+                 # log: "creating new connection"
+                 connection = self.create_connection(origin)
+                 self._connections.append(connection)
+diff --git a/httpcore/_sync/connection_pool.py b/httpcore/_sync/connection_pool.py
+index f9d4406..5cb3f50 100644
+--- a/httpcore/_sync/connection_pool.py
++++ b/httpcore/_sync/connection_pool.py
+@@ -291,7 +291,7 @@ class ConnectionPool(RequestInterface):
+                 closing_connections.append(connection)
+             elif (
+                 connection.is_idle()
+-                and len([connection.is_idle() for connection in self._connections])
++                and len([c for c in self._connections if c.is_idle()])
+                 > self._max_keepalive_connections
+             ):
+                 # log: "closing idle connection"
+@@ -321,10 +321,7 @@ class ConnectionPool(RequestInterface):
+                 # log: "reusing existing connection"
+                 connection = available_connections[0]
+                 pool_request.assign_to_connection(connection)
+-            elif (
+-                len([c for c in self._connections if not c.is_idle()])
+-                < self._max_connections
+-            ):
++            elif len(self._connections) < self._max_connections:
+                 # log: "creating new connection"
+                 connection = self.create_connection(origin)
+                 self._connections.append(connection)
