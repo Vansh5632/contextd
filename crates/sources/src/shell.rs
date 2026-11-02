@@ -363,6 +363,21 @@ mod tests {
     }
 
     #[test]
+    fn note_line_is_ingested() {
+        let line = r#"{"source":"note","payload":{"session":"live","text":"Decision: idle connections count toward the cap."}}"#;
+        match parse_inbound_line(line).unwrap() {
+            InboundLine::Event(event) => {
+                assert_eq!(event.source, contextd_core::event::EventSource::Note);
+                assert_eq!(
+                    event.payload["text"],
+                    "Decision: idle connections count toward the cap."
+                );
+            }
+            other => panic!("expected an event, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn claim_events_cannot_be_ingested_over_the_socket() {
         let err = parse_inbound_line(
             r#"{"source":"claim","payload":{"op":"assert","claim_id":"c_x","task_id":"t_x","origin":"user"}}"#,

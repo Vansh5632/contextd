@@ -15,6 +15,11 @@
       "sha256": "e44ea0cdb976e412b9e61d0a9620961b2632723110e53942f62efc167b9fcc95",
       "tokens": 1122
     },
+    "contextd-component2": {
+      "file": "packets/contextd_component2.txt",
+      "sha256": "1f539d1acb2acfd95656ef131e858b95192c1a3b9f717d601d91d2e23575378d",
+      "tokens": 1030
+    },
     "contextd-new": {
       "file": "packets/contextd_new.txt",
       "sha256": "ace721e144a835ed7c6fc4278ac2c35dade22ade515411077147657177f8f2fe",
@@ -96,6 +101,10 @@
     "contextd": {
       "sha256": "fbd67b59524f3464f16d5d3a757de971876556154135a7433b9a7246041e0532",
       "tokens": 1138
+    },
+    "contextd-component2": {
+      "sha256": "2bacd5d2b8b5376420f161eb227f9df99e27d81e37b5d897e639f3845bea65ae",
+      "tokens": 1046
     },
     "contextd-new": {
       "sha256": "94d54986d7ac770b64c299acdb6caa0fb83181a78c2154ecfb76063ac5b058f8",

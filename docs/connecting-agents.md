@@ -42,12 +42,15 @@ not from MCP:
 
 ```bash
 contextd intent "fix the limiter undercount"
+contextd note "the idle count looks wrong in staging"
 contextd claim constraint "do not change the public signature"
 contextd claim decision "keep this in-process"
 contextd claim ruled-out "database contention"
 contextd claim retract c_01HZX...
 contextd claim done
 ```
+
+`contextd note <TEXT>` stores a raw sentence on the event log (`source: note`). It is not a claim. A later handoff may quote it.
 
 The daemon socket is local and same-uid. An agent that can run a shell can also run `contextd claim`.
 That is a convention, not a security boundary.

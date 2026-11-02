@@ -11,6 +11,7 @@ pub enum EventSource {
     Proc,
     Manifest,
     Claim,
+    Note,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +92,7 @@ mod tests {
             (EventSource::Proc, "\"proc\""),
             (EventSource::Manifest, "\"manifest\""),
             (EventSource::Claim, "\"claim\""),
+            (EventSource::Note, "\"note\""),
         ];
 
         for (source, expected) in cases {

@@ -1,0 +1,196 @@
+{
+  "accepted": [
+    {
+      "claim_id": "h_A_8",
+      "confidence": "stated",
+      "evidence_ids": [
+        "h_A_8"
+      ],
+      "kind": "constraint",
+      "origin": "user"
+    },
+    {
+      "claim_id": "h_A_8b",
+      "confidence": "stated",
+      "evidence_ids": [
+        "h_A_8"
+      ],
+      "kind": "constraint",
+      "origin": "user"
+    },
+    {
+      "claim_id": "h_A_12",
+      "confidence": "inferred",
+      "evidence_ids": [
+        "h_A_12"
+      ],
+      "kind": "ruled_out",
+      "origin": "agent"
+    },
+    {
+      "claim_id": "h_A_16",
+      "confidence": "inferred",
+      "evidence_ids": [
+        "h_A_16"
+      ],
+      "kind": "ruled_out",
+      "origin": "agent"
+    },
+    {
+      "claim_id": "h_A_18",
+      "confidence": "inferred",
+      "evidence_ids": [
+        "h_A_18",
+        "h_A_17"
+      ],
+      "kind": "reality",
+      "origin": "agent"
+    },
+    {
+      "claim_id": "h_A_20",
+      "confidence": "inferred",
+      "evidence_ids": [
+        "h_A_20"
+      ],
+      "kind": "ruled_out",
+      "origin": "agent"
+    },
+    {
+      "claim_id": "h_A_21",
+      "confidence": "inferred",
+      "evidence_ids": [
+        "h_A_21"
+      ],
+      "kind": "decision",
+      "origin": "agent"
+    },
+    {
+      "claim_id": "h_A_23",
+      "confidence": "hypothesis",
+      "evidence_ids": [
+        "h_A_23"
+      ],
+      "kind": "unknown",
+      "origin": "agent"
+    },
+    {
+      "claim_id": "h_A_24",
+      "confidence": "inferred",
+      "evidence_ids": [
+        "h_A_24"
+      ],
+      "kind": "next_action",
+      "origin": "agent"
+    }
+  ],
+  "rejected": [],
+  "snapshot": {
+    "constraints": [
+      {
+        "confidence": "stated",
+        "evidence_ids": [
+          "h_A_8"
+        ],
+        "id": "h_A_8",
+        "origin": "user",
+        "text": "Constraint for whatever fix comes out of this: ConnectionPool.__init__ and AsyncConnectionPool.__init__ keep their public signature and defaults (max_connections=10, max_keepalive_connections=None, ...), and handle_request / handle_async_request stay unchanged."
+      },
+      {
+        "confidence": "stated",
+        "evidence_ids": [
+          "h_A_8"
+        ],
+        "id": "h_A_8b",
+        "origin": "user",
+        "text": "No new dependencies either."
+      }
+    ],
+    "estimated_tokens": 1022,
+    "focal_task": {
+      "decisions": [
+        {
+          "confidence": "inferred",
+          "evidence_ids": [
+            "h_A_21"
+          ],
+          "id": "h_A_21",
+          "origin": "agent",
+          "text": "Decision: every connection the pool holds, idle keepalive ones included, counts toward max_connections. At the cap a request for a new origin has to reuse or evict an idle connection rather than exceed the cap."
+        }
+      ],
+      "id": "t_a58f76e3ca4078e8a849ed9682f450cc",
+      "next_action": {
+        "confidence": "inferred",
+        "evidence_ids": [
+          "h_A_24"
+        ],
+        "id": "h_A_24",
+        "origin": "agent",
+        "text": "Next step, not started: fix the create-new-connection branch in _assign_requests_to_connections in httpcore/_async/connection_pool.py, then regenerate the sync file with scripts/unasync.py and rerun the visible test."
+      },
+      "reality": [
+        {
+          "confidence": "observed",
+          "evidence_ids": [
+            "01M3XNAR7H75PYWVJ26YTXHHXG"
+          ],
+          "id": "c_3b9e96b70d62de4da33656b0f9774e8a",
+          "origin": "projector",
+          "text": "python -m pytest -q -p no:cacheprovider tests/test_pool_counts.py exited 1"
+        },
+        {
+          "confidence": "inferred",
+          "evidence_ids": [
+            "h_A_18",
+            "h_A_17"
+          ],
+          "id": "h_A_18",
+          "origin": "agent",
+          "text": "The create-new-connection branch only counts connections that are not idle, so idle keepalive connections never count toward max_connections and the idle-eviction branch below it is never reached."
+        }
+      ],
+      "ruled_out": [
+        {
+          "confidence": "inferred",
+          "evidence_ids": [
+            "h_A_12"
+          ],
+          "id": "h_A_12",
+          "origin": "agent",
+          "text": "Mock backend is fine: every connect_tcp gets a fresh stream over its own copy of the buffer, and a finished request leaves its connection IDLE in the pool as it should. Ruled out as the cause."
+        },
+        {
+          "confidence": "inferred",
+          "evidence_ids": [
+            "h_A_16"
+          ],
+          "id": "h_A_16",
+          "origin": "agent",
+          "text": "Single thread, no concurrency, and it still over-creates: a and b are IDLE, c gets a brand new connection, 3 held with max_connections=2. Nothing can lose a wakeup here, so the lock and synchronization are ruled out."
+        },
+        {
+          "confidence": "inferred",
+          "evidence_ids": [
+            "h_A_20"
+          ],
+          "id": "h_A_20",
+          "origin": "agent",
+          "text": "Rejected the Redis counter. httpcore is a single-process client library, the cap is per pool, and a network service dependency is out of scope for a pool fix."
+        }
+      ],
+      "status": "active",
+      "unknowns": [
+        {
+          "confidence": "hypothesis",
+          "evidence_ids": [
+            "h_A_23"
+          ],
+          "id": "h_A_23",
+          "origin": "agent",
+          "text": "Also noticed: the keepalive cleanup loop uses len([connection.is_idle() for connection in self._connections]), which counts every connection, not only idle ones. Odd, but not this bug. Not touching keepalive cleanup or _max_keepalive_connections; out of scope."
+        }
+      ]
+    },
+    "notice": "Claims are evidence. Verify the repo. observed > stated > inferred > hypothesis."
+  }
+}

@@ -28,6 +28,7 @@ PACKET_FILES = {
     "stale-only": "stale_only.txt",
     "contextd": "contextd.txt",
     "contextd-new": "contextd_new.txt",
+    "contextd-component2": "contextd_component2.txt",
 }
 PACKET_KINDS = {
     "none": "paragraphs",
@@ -37,6 +38,7 @@ PACKET_KINDS = {
     "stale-only": "paragraphs",
     "contextd": "contextd",
     "contextd-new": "contextd",
+    "contextd-component2": "contextd",
 }
 
 HISTORY_DELIMITER = "\n\n----\n\n"
