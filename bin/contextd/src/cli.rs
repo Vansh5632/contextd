@@ -180,11 +180,11 @@ pub async fn run_claim(config: &AppConfig, command: ClaimCommand) -> anyhow::Res
                 );
             }
             Ok(value) => {
-                if let Some(id) = value.get("claim_id").and_then(|id| id.as_str()) {
-                    if !id.is_empty() {
-                        println!("Noted: {id}");
-                        return Ok(());
-                    }
+                if let Some(id) = value.get("claim_id").and_then(|id| id.as_str())
+                    && !id.is_empty()
+                {
+                    println!("Noted: {id}");
+                    return Ok(());
                 }
                 println!("Noted.");
                 Ok(())

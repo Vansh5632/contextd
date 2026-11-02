@@ -475,14 +475,13 @@ pub fn validate_against_projection(
         }
     }
 
-    if origin == ClaimOrigin::Agent && event.kind == Some(ClaimKind::NextAction) {
-        if let Some(frontier) =
+    if origin == ClaimOrigin::Agent
+        && event.kind == Some(ClaimKind::NextAction)
+        && let Some(frontier) =
             projection.current_slot(&event.task_id, ClaimKind::NextAction, FRONTIER_SUBJECT)
-        {
-            if frontier.origin == ClaimOrigin::User {
-                return Err(ClaimError::new("cannot overwrite a user next action"));
-            }
-        }
+        && frontier.origin == ClaimOrigin::User
+    {
+        return Err(ClaimError::new("cannot overwrite a user next action"));
     }
 
     Ok(())
@@ -492,7 +491,7 @@ pub fn validate_against_projection(
 pub fn check_text(text: &str) -> Result<String, ClaimError> {
     let trimmed = text.trim();
     let chars = trimmed.chars().count();
-    if chars < 1 || chars > MAX_CLAIM_TEXT {
+    if !(1..=MAX_CLAIM_TEXT).contains(&chars) {
         return Err(ClaimError::new("claim text must be 1 to 500 characters"));
     }
     Ok(trimmed.to_string())

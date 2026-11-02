@@ -163,10 +163,9 @@ fn ensure_projector_frontier(
 ) {
     if let Some(frontier) =
         projection.current_slot(task_id, ClaimKind::NextAction, FRONTIER_SUBJECT)
+        && frontier.origin != ClaimOrigin::Projector
     {
-        if frontier.origin != ClaimOrigin::Projector {
-            return;
-        }
+        return;
     }
     let previous =
         projection.supersede_slot(task_id, ClaimKind::NextAction, FRONTIER_SUBJECT, at_ms);
@@ -352,7 +351,7 @@ mod tests {
         events
     }
 
-    fn current<'a>(projection: &'a Projection, kind: ClaimKind) -> Vec<&'a Claim> {
+    fn current(projection: &Projection, kind: ClaimKind) -> Vec<&Claim> {
         projection
             .claims
             .iter()

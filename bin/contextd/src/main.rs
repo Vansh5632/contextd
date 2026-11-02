@@ -263,14 +263,12 @@ async fn record_agent_claim(
         claim_id.clone()
     };
     let mut supersedes = replaces.map(str::to_string);
-    if kind == ClaimKind::NextAction {
-        if let Some(frontier) =
+    if kind == ClaimKind::NextAction
+        && let Some(frontier) =
             projection.current_slot(&task.id, ClaimKind::NextAction, FRONTIER_SUBJECT)
-        {
-            if frontier.origin != ClaimOrigin::User {
-                supersedes = Some(frontier.id.clone());
-            }
-        }
+        && frontier.origin != ClaimOrigin::User
+    {
+        supersedes = Some(frontier.id.clone());
     }
     let body = ClaimEvent {
         op: ClaimOp::Assert,
@@ -508,10 +506,8 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
                             .get("exit_code")
                             .and_then(|value| value.as_i64())
                             .is_some();
-                    if has_exit {
-                        if let Err(e) = memory::project::rebuild(&conn) {
-                            error!("Failed to rebuild working-state projection: {e}");
-                        }
+                    if has_exit && let Err(e) = memory::project::rebuild(&conn) {
+                        error!("Failed to rebuild working-state projection: {e}");
                     }
                 }
 
