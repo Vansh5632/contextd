@@ -400,6 +400,51 @@ mod tests {
     }
 
     #[test]
+    fn note_event_does_not_open_a_task() {
+        let events = vec![RawEvent {
+            id: "n1".into(),
+            timestamp_ms: 1,
+            source: EventSource::Note,
+            payload: json!({
+                "session": "A",
+                "text": "Decision: idle connections count toward the cap."
+            }),
+        }];
+        let projection = fold(&events);
+        assert!(projection.tasks.is_empty());
+        assert!(projection.claims.is_empty());
+    }
+
+    #[test]
+    fn shell_output_does_not_change_the_reality_text() {
+        let command = "python -m pytest tests/test_pool_counts.py";
+        let events = vec![RawEvent {
+            id: "s1".into(),
+            timestamp_ms: 1,
+            source: EventSource::Shell,
+            payload: json!({
+                "command": command,
+                "exit_code": 1,
+                "cwd": "/work",
+                "session": "A",
+                "output": "E   AssertionError: count 3 diverged from 2"
+            }),
+        }];
+        let projection = fold(&events);
+        let reality = projection
+            .claims
+            .iter()
+            .find(|claim| claim.kind == ClaimKind::Reality)
+            .expect("exit becomes a reality");
+        assert_eq!(
+            reality.text,
+            format!("{command} exited 1")
+        );
+        assert_eq!(reality.confidence, ClaimConfidence::Observed);
+        assert!(!reality.text.contains("diverged"));
+    }
+
+    #[test]
     fn exit_zero_supersedes() {
         let events = vec![shell("fail", 1, PYTEST, 1), shell("pass", 2, PYTEST, 0)];
         let projection = fold(&events);

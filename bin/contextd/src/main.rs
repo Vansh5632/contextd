@@ -321,6 +321,7 @@ async fn main() -> anyhow::Result<()> {
         // background; this process only asks it for the briefing.
         cli::Command::Mcp => mcp::stdio::run(config.socket_path).await,
         cli::Command::Intent(text) => cli::run_intent(&config, &text).await,
+        cli::Command::Note(text) => cli::run_note(&config, &text),
         cli::Command::Claim(claim) => cli::run_claim(&config, claim).await,
         cli::Command::Status => cli::run_status(&config).await,
         cli::Command::Install => cli::run_install(&config),

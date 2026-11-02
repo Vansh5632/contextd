@@ -24,6 +24,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Refuse generated dumps and agent plans
+        run: |
+          set -eu
+          tracked=$(git ls-files)
+          bad=$(printf '%s\n' "$tracked" | grep -E \
+            '^(docs/superpowers/|eval/component0/runs/)|contextd_component2(_claims|_report)?\.(txt|json)$' \
+            || true)
+          if [ -n "$bad" ]; then
+            printf 'These paths are generated dumps or agent plans and must not be committed:\n%s\n' "$bad" >&2
+            exit 1
+          fi
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:

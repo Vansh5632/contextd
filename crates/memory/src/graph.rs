@@ -310,6 +310,7 @@ pub fn entities_of(event: &ProcessedEvent) -> Vec<Entity> {
             }
         }
         EventSource::Claim => {}
+        EventSource::Note => {}
     }
 
     // An error is worth a node whatever produced it: "what else is going on
