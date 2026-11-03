@@ -250,6 +250,15 @@ async fn enrich_one(
             .unwrap_or_else(|| event.raw.payload.to_string())
     };
 
+    if event.raw.source == contextd_core::event::EventSource::Note {
+        // The sentence stays in the local log. Do not POST it to Ollama.
+        let conn = store.writer().await;
+        if let Err(err) = mark_enriched(&conn, event_id, now_ms()) {
+            warn!(event_id, error = ?err, "failed to mark note enriched");
+        }
+        return;
+    }
+
     let Some(client) = ollama else { return };
 
     if embed_paused_until.is_some_and(|until| Instant::now() < until) {
@@ -297,6 +306,8 @@ const IDENTITY_KEYS: &[&str] = &[
     "from",
     "to",
     "remote",
+    "session",
+    "text",
 ];
 
 fn compact_payload(payload: &Value, summary: Option<&str>) -> Value {

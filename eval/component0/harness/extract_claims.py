@@ -110,12 +110,18 @@ def collapse(value: str) -> str:
 
 
 def content_tokens(text: str) -> set[str]:
-    return {match.group(0).lower() for match in _TOKEN.finditer(text)} - _STOP
+    found: set[str] = set()
+    for match in _TOKEN.finditer(text):
+        word = match.group(0).lower().strip("_")
+        parts = [word, *word.split("_")]
+        for part in parts:
+            if len(part) >= 4 and part not in _STOP:
+                found.add(part)
+    return found
 
 
 def overlap(claim: str, support: str) -> int:
-    folded = support.lower()
-    return sum(1 for token in content_tokens(claim) if token in folded)
+    return len(content_tokens(claim) & content_tokens(support))
 
 
 def _shell_state(
@@ -147,8 +153,24 @@ def open_sessions(events: list[dict[str, Any]]) -> list[str]:
     return sessions
 
 
+def _ordered(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        events,
+        key=lambda event: (
+            int(event.get("timestamp_ms") or 0),
+            str(event.get("id") or ""),
+        ),
+    )
+
+
 def focal_command(events: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Oldest shell event whose command is still failing."""
+    return _failing_command(events, session=None)
+
+
+def _failing_command(
+    events: list[dict[str, Any]], *, session: str | None
+) -> dict[str, Any] | None:
     latest: dict[tuple[str, str], int | None] = {}
     first: dict[tuple[str, str], dict[str, Any]] = {}
     for event in events:
@@ -156,6 +178,8 @@ def focal_command(events: list[dict[str, Any]]) -> dict[str, Any] | None:
         if state is None:
             continue
         key, code = state
+        if session is not None and key[0] != session:
+            continue
         latest[key] = code
         first.setdefault(key, event)
     for event in events:
@@ -163,6 +187,8 @@ def focal_command(events: list[dict[str, Any]]) -> dict[str, Any] | None:
         if state is None:
             continue
         key, _code = state
+        if session is not None and key[0] != session:
+            continue
         if latest[key] not in (0, None) and first[key] is event:
             return event
     return None
@@ -227,17 +253,32 @@ def _draft(
     )
 
 
+def _task_for(event: dict[str, Any]) -> str:
+    payload = event.get("payload") or {}
+    return task_subject(str(payload.get("cwd") or ""), str(payload.get("command") or ""))
+
+
+def _support_event(
+    events: list[dict[str, Any]], note: dict[str, Any], index: int
+) -> dict[str, Any] | None:
+    support_id = note.get("support_event_id")
+    if support_id:
+        for event in events:
+            if str(event.get("id")) == str(support_id):
+                return event
+        return None
+    return events[index - 1] if index else None
+
+
 def extract(events: list[dict[str, Any]]) -> Extraction:
     """Quote load-bearing notes from sessions that still have a failing command."""
+    events = _ordered(events)
     result = Extraction()
-    failing = focal_command(events)
-    if failing is None:
+    if focal_command(events) is None:
         result.skipped.append(
             {"unit": None, "reason": "no command is still failing"}
         )
         return result
-    payload = failing.get("payload") or {}
-    task = task_subject(str(payload.get("cwd") or ""), str(payload.get("command") or ""))
     sessions = set(open_sessions(events))
     seen: set[tuple[str, str]] = set()
 
@@ -245,7 +286,8 @@ def extract(events: list[dict[str, Any]]) -> Extraction:
         if event.get("source") != "note":
             continue
         note = event.get("payload") or {}
-        if str(note.get("session") or "") not in sessions:
+        session = str(note.get("session") or "")
+        if session not in sessions:
             result.skipped.append(
                 {
                     "unit": event["id"],
@@ -253,11 +295,21 @@ def extract(events: list[dict[str, Any]]) -> Extraction:
                 }
             )
             continue
+        failing = _failing_command(events, session=session)
+        if failing is None:
+            result.skipped.append(
+                {
+                    "unit": event["id"],
+                    "reason": "session has no command that is still failing",
+                }
+            )
+            continue
+        task = _task_for(failing)
         text = str(note.get("text") or "").strip()
         if not text:
             result.skipped.append({"unit": event["id"], "reason": "empty note"})
             continue
-        previous = events[index - 1] if index else None
+        previous = _support_event(events, note, index)
         drafts = _drafts_for_note(event, text, previous, task)
         if not drafts:
             result.skipped.append(
@@ -429,36 +481,48 @@ def write_packet(
     episode_dir: Path,
     *,
     repo_root: Path = REPO_ROOT,
-    cargo_bin: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Extract, admit through the Component 1 projector, and return the report."""
+    """Extract, admit through the Component 1 projector, and return the report.
+
+    The transcript importer builds a fixture event log. The gate reads that
+    log, so evidence ids resolve to events, and admitted claims are written
+    back onto it. The frozen replay file is not modified.
+    """
     episode_dir = episode_dir.resolve()
-    events_path = episode_dir / EVENTS_REL
-    events = import_episode(episode_dir, events_path)
+    replay_path = episode_dir / EVENTS_REL
+    events = import_episode(episode_dir, replay_path)
     if focal_command(events) is None:
         raise SystemExit("no failing command in the history")
     extraction = extract(events)
     claims_path = episode_dir / "packets" / "contextd_component2_claims.json"
     report_path = episode_dir / "packets" / "contextd_component2_report.json"
     packet_path = episode_dir / "packets" / "contextd_component2.txt"
+    log_path = episode_dir / "packets" / "contextd_component2_events.jsonl"
     claims_path.parent.mkdir(exist_ok=True)
     claims_path.write_text(json.dumps(extraction.as_dict(), indent=2) + "\n")
-    command = cargo_bin or [
-        "cargo",
-        "run",
-        "-q",
-        "-p",
-        "broker",
-        "--bin",
-        "project_claims",
-        "--",
-    ]
+    log_path.write_text(
+        "".join(json.dumps(event, separators=(",", ":")) + "\n" for event in events)
+    )
     result = subprocess.run(
-        [*command, str(events_path), str(claims_path), str(packet_path), str(report_path)],
+        [
+            "cargo",
+            "run",
+            "-q",
+            "-p",
+            "broker",
+            "--bin",
+            "project_claims",
+            "--",
+            str(log_path),
+            str(claims_path),
+            str(packet_path),
+            str(report_path),
+        ],
         cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
+        shell=False,
     )
     if result.returncode != 0:
         raise SystemExit(

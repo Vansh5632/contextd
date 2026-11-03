@@ -32,3 +32,4 @@ docs/superpowers/
 eval/component0/episodes/**/packets/contextd_component2.txt
 eval/component0/episodes/**/packets/contextd_component2_claims.json
 eval/component0/episodes/**/packets/contextd_component2_report.json
+eval/component0/episodes/**/packets/contextd_component2_events.jsonl

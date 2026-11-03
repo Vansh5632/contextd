@@ -179,14 +179,13 @@ pub async fn run_intent(config: &AppConfig, text: &str) -> anyhow::Result<()> {
 
 /// Append a note to the live session event log without filing a claim.
 pub fn run_note(config: &AppConfig, text: &str) -> anyhow::Result<()> {
-    use std::io::Write;
+    use std::io::{BufRead, Write};
     use std::net::Shutdown;
     use std::os::unix::net::UnixStream;
 
     let payload = serde_json::json!({
         "source": "note",
         "payload": {
-            "session": "live",
             "text": text,
         }
     });
@@ -196,10 +195,14 @@ pub fn run_note(config: &AppConfig, text: &str) -> anyhow::Result<()> {
     let note_err = || anyhow::anyhow!("contextd note: is the daemon running?");
 
     let mut stream = UnixStream::connect(&config.socket_path).map_err(|_| note_err())?;
-    stream
-        .write_all(line.as_bytes())
-        .map_err(|_| note_err())?;
+    stream.write_all(line.as_bytes()).map_err(|_| note_err())?;
     stream.shutdown(Shutdown::Write).map_err(|_| note_err())?;
+    let mut response = String::new();
+    BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut response)
+        .map_err(|_| note_err())?;
+    if !response.contains("\"stored\":true") {
+        anyhow::bail!("contextd note: the daemon did not store the note");
+    }
 
     println!("Noted.");
     Ok(())

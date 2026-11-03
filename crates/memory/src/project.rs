@@ -436,10 +436,7 @@ mod tests {
             .iter()
             .find(|claim| claim.kind == ClaimKind::Reality)
             .expect("exit becomes a reality");
-        assert_eq!(
-            reality.text,
-            format!("{command} exited 1")
-        );
+        assert_eq!(reality.text, format!("{command} exited 1"));
         assert_eq!(reality.confidence, ClaimConfidence::Observed);
         assert!(!reality.text.contains("diverged"));
     }

@@ -82,6 +82,23 @@ def test_extractor_and_gate_do_not_name_the_gold_files() -> None:
         assert "gold/" not in text
 
 
+def test_overlap_requires_whole_words() -> None:
+    assert overlap("idle count", "the counter is idle today") == 1
+    assert overlap("idle count", "idleness is countless") == 0
+
+
+def test_a_note_stays_on_its_own_failing_command() -> None:
+    events = [
+        _cmd(1, "python -m pytest tests/test_pool_counts.py", code=1, session="A"),
+        _cmd(2, "python -m pytest tests/test_host.py", code=1, session="B", cwd="/other"),
+        _note(3, "Decision: idle connections count toward the cap.", session="B"),
+    ]
+    result = extract(events)
+    assert len(result.claims) == 1
+    assert result.claims[0].task_subject.startswith("/other\n")
+    assert "test_host.py" in result.claims[0].task_subject
+
+
 def test_extractor_does_not_open_the_transcript() -> None:
     text = EXTRACTOR.read_text()
     assert "history.jsonl" not in text

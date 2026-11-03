@@ -16,13 +16,13 @@ use std::process::ExitCode;
 
 use broker::snapshot::render;
 use contextd_core::claim::{
-    validate, validate_against_projection, ClaimConfidence, ClaimEvent, ClaimKind, ClaimOp,
-    ClaimOrigin, FRONTIER_SUBJECT,
+    ClaimConfidence, ClaimEvent, ClaimKind, ClaimOp, ClaimOrigin, FRONTIER_SUBJECT, validate,
+    validate_against_projection,
 };
 use contextd_core::event::{EventSource, RawEvent};
-use memory::project::{fold, task_id_for_subject};
+use memory::project::{fold, shell_subject, task_id_for_subject};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const MIN_OVERLAP: usize = 2;
 const TOKEN_BUDGET: usize = 1_500;
@@ -98,14 +98,18 @@ fn main() -> ExitCode {
             .cmp(&right.timestamp_ms)
             .then_with(|| left.id.cmp(&right.id))
     });
-    let base_ts = log.iter().map(|event| event.timestamp_ms).max().unwrap_or(0);
+    let base_ts = log
+        .iter()
+        .map(|event| event.timestamp_ms)
+        .max()
+        .unwrap_or(0);
     let mut projection = fold(&log);
     let mut accepted: Vec<Value> = Vec::new();
     let mut rejected: Vec<Value> = Vec::new();
     let mut seen: Vec<(String, String)> = Vec::new();
 
     for (index, candidate) in file.claims.into_iter().enumerate() {
-        match admit(&candidate, &projection, &seen) {
+        match admit(&candidate, &projection, &seen, &log) {
             Ok(event) => {
                 seen.push((
                     candidate.kind.clone(),
@@ -136,6 +140,10 @@ fn main() -> ExitCode {
 
     let snapshot = render(&projection, None, TOKEN_BUDGET);
     let packet = serde_json::to_string_pretty(&snapshot).expect("snapshot serializes");
+    if let Err(err) = write_log(&events_path, &log) {
+        eprintln!("writing event log: {err}");
+        return ExitCode::from(1);
+    }
     if let Err(err) = fs::write(&packet_path, format!("{packet}\n")) {
         eprintln!("writing packet: {err}");
         return ExitCode::from(1);
@@ -147,7 +155,10 @@ fn main() -> ExitCode {
     });
     if let Err(err) = fs::write(
         &report_path,
-        format!("{}\n", serde_json::to_string_pretty(&report).expect("report serializes")),
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&report).expect("report serializes")
+        ),
     ) {
         eprintln!("writing report: {err}");
         return ExitCode::from(1);
@@ -163,6 +174,7 @@ fn admit(
     candidate: &Candidate,
     projection: &contextd_core::claim::Projection,
     seen: &[(String, String)],
+    events: &[RawEvent],
 ) -> Result<ClaimEvent, String> {
     let origin = ClaimOrigin::parse(&candidate.origin)
         .ok_or_else(|| format!("unknown origin {}", candidate.origin))?;
@@ -174,25 +186,56 @@ fn admit(
     let confidence = ClaimConfidence::parse(&candidate.confidence)
         .ok_or_else(|| format!("unknown confidence {}", candidate.confidence))?;
     let text = candidate.text.trim();
-    if text.is_empty() || !candidate.source_text.contains(text) {
-        return Err("claim text is not a verbatim span of the source note".into());
-    }
     if candidate.evidence_ids.is_empty() {
         return Err("claim has no evidence id".into());
     }
+    for id in &candidate.evidence_ids {
+        if event_by_id(events, id).is_none() {
+            return Err(format!("evidence id {id} is not in the event log"));
+        }
+    }
+    let note = event_by_id(events, &candidate.evidence_ids[0])
+        .filter(|event| event.source == EventSource::Note)
+        .ok_or_else(|| "first evidence id is not a note".to_string())?;
+    let note_text = note
+        .payload
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if text.is_empty() || !note_text.contains(text) || candidate.source_text != note_text {
+        return Err("claim text is not a verbatim span of the source note".into());
+    }
     if candidate.task_subject.trim().is_empty() {
         return Err("claim has no task subject".into());
+    }
+    if !failing_subjects(events).contains(candidate.task_subject.trim()) {
+        return Err("claim is not attached to a command that is still failing".into());
     }
     let key = (candidate.kind.clone(), collapse(text).to_lowercase());
     if seen.iter().any(|item| item == &key) {
         return Err("duplicate of a claim already admitted".into());
     }
     if kind == ClaimKind::Reality {
-        let support = candidate.support_text.as_deref().unwrap_or("");
-        if content_overlap(text, support) < MIN_OVERLAP {
-            return Err(
-                "inferred reality is not supported by the cited tool output".into(),
-            );
+        let support_event = candidate.evidence_ids.iter().find_map(|id| {
+            event_by_id(events, id).filter(|event| event.source == EventSource::Shell)
+        });
+        let Some(support_event) = support_event else {
+            return Err("inferred reality does not cite a shell event".into());
+        };
+        let output = support_event
+            .payload
+            .get("output")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if candidate
+            .support_text
+            .as_deref()
+            .is_some_and(|support| support != output)
+        {
+            return Err("support text does not match the cited shell output".into());
+        }
+        if content_overlap(text, output) < MIN_OVERLAP {
+            return Err("inferred reality is not supported by the cited tool output".into());
         }
     }
     if confidence == ClaimConfidence::Observed {
@@ -247,11 +290,51 @@ fn collapse(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn write_log(path: &str, events: &[RawEvent]) -> Result<(), String> {
+    let mut body = String::new();
+    for event in events {
+        let line = serde_json::to_string(event).map_err(|err| err.to_string())?;
+        body.push_str(&line);
+        body.push('\n');
+    }
+    fs::write(path, body).map_err(|err| err.to_string())
+}
+
+fn event_by_id<'a>(events: &'a [RawEvent], id: &str) -> Option<&'a RawEvent> {
+    events.iter().find(|event| event.id == id)
+}
+
+fn failing_subjects(events: &[RawEvent]) -> BTreeSet<String> {
+    let mut latest: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    for event in events {
+        if event.source != EventSource::Shell {
+            continue;
+        }
+        let Some(command) = event.payload.get("command").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(code) = event.payload.get("exit_code").and_then(Value::as_i64) else {
+            continue;
+        };
+        let cwd = event
+            .payload
+            .get("cwd")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        latest.insert(shell_subject(cwd, command), code);
+    }
+    latest
+        .into_iter()
+        .filter(|(_, code)| *code != 0)
+        .map(|(subject, _)| subject)
+        .collect()
+}
+
 fn content_overlap(claim: &str, support: &str) -> usize {
-    let support = support.to_lowercase();
+    let support_tokens: BTreeSet<String> = content_tokens(support).collect();
     let mut hits = BTreeSet::new();
     for token in content_tokens(claim) {
-        if support.contains(&token) {
+        if support_tokens.contains(&token) {
             hits.insert(token);
         }
     }
@@ -276,7 +359,13 @@ fn content_tokens(text: &str) -> impl Iterator<Item = String> {
 }
 
 fn keep_token(tokens: &mut Vec<String>, token: &str) {
+    let token = token.trim_matches('_');
     if token.len() >= 4 && !STOP.contains(&token) {
         tokens.push(token.to_string());
+    }
+    for part in token.split('_') {
+        if part.len() >= 4 && !STOP.contains(&part) && part != token {
+            tokens.push(part.to_string());
+        }
     }
 }

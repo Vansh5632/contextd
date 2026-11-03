@@ -23,13 +23,30 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Refuse generated dumps and agent plans
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -eu
-          tracked=$(git ls-files)
-          bad=$(printf '%s\n' "$tracked" | grep -E \
-            '^(docs/superpowers/|eval/component0/runs/)|contextd_component2(_claims|_report)?\.(txt|json)$' \
+          range=""
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            printf '%s' "$BASE_SHA" | grep -Eq '^[0-9a-f]{40}$'
+            range="$BASE_SHA HEAD"
+          elif printf '%s' "$BEFORE_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            range="$BEFORE_SHA HEAD"
+          fi
+          if [ -z "$range" ]; then
+            exit 0
+          fi
+          # shellcheck disable=SC2086
+          names=$(git diff --name-only --diff-filter=A $range || true)
+          bad=$(printf '%s\n' "$names" | grep -E \
+            '^(docs/superpowers/|eval/component0/runs/)|contextd_component2(_claims|_report|_events)?\.(txt|json|jsonl)$' \
             || true)
           if [ -n "$bad" ]; then
             printf 'These paths are generated dumps or agent plans and must not be committed:\n%s\n' "$bad" >&2
