@@ -20,6 +20,7 @@ COMMANDS:
     run                 Run the daemon in the foreground (default)
     mcp                 Speak MCP over stdio. This is what an agent launches.
     intent <TEXT>       Record what you are working on
+    note <TEXT>          Record a sentence for a later handoff. This does not file a claim.
     claim constraint <TEXT>
     claim decision <TEXT>
     claim ruled-out <TEXT>
@@ -74,6 +75,7 @@ pub enum Command {
     Run,
     Mcp,
     Intent(String),
+    Note(String),
     Claim(ClaimCommand),
     Status,
     Install,
@@ -106,6 +108,15 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                     .to_string());
             }
             Command::Intent(text)
+        }
+        "note" => {
+            let text = args[1..].join(" ");
+            if text.trim().is_empty() {
+                return Err("note needs a sentence, e.g. \
+                            `contextd note \"Decision: keep the idle count\"`"
+                    .to_string());
+            }
+            Command::Note(text)
         }
         "claim" => parse_claim(&args[1..])?,
         other => return Err(format!("unknown command `{other}`. Try `contextd help`.")),
@@ -164,6 +175,37 @@ pub async fn run_intent(config: &AppConfig, text: &str) -> anyhow::Result<()> {
             config.socket_path.display()
         )),
     }
+}
+
+/// Append a note to the live session event log without filing a claim.
+pub fn run_note(config: &AppConfig, text: &str) -> anyhow::Result<()> {
+    use std::io::{BufRead, Write};
+    use std::net::Shutdown;
+    use std::os::unix::net::UnixStream;
+
+    let payload = serde_json::json!({
+        "source": "note",
+        "payload": {
+            "text": text,
+        }
+    });
+    let mut line = serde_json::to_string(&payload)?;
+    line.push('\n');
+
+    let note_err = || anyhow::anyhow!("contextd note: is the daemon running?");
+
+    let mut stream = UnixStream::connect(&config.socket_path).map_err(|_| note_err())?;
+    stream.write_all(line.as_bytes()).map_err(|_| note_err())?;
+    stream.shutdown(Shutdown::Write).map_err(|_| note_err())?;
+    let mut response = String::new();
+    BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut response)
+        .map_err(|_| note_err())?;
+    if !response.contains("\"stored\":true") {
+        anyhow::bail!("contextd note: the daemon did not store the note");
+    }
+
+    println!("Noted.");
+    Ok(())
 }
 
 pub async fn run_claim(config: &AppConfig, command: ClaimCommand) -> anyhow::Result<()> {
@@ -452,6 +494,18 @@ mod tests {
     }
 
     #[test]
+    fn note_command_keeps_the_sentence() {
+        let args = [
+            "note".into(),
+            "Decision: idle connections count toward the cap.".into(),
+        ];
+        assert_eq!(
+            parse(&args).unwrap(),
+            Command::Note("Decision: idle connections count toward the cap.".into())
+        );
+    }
+
+    #[test]
     fn an_empty_intent_is_refused_with_an_example() {
         let err = parse(&args(&["intent"])).unwrap_err();
         assert!(err.contains("contextd intent"), "unhelpful error: {err}");
@@ -472,6 +526,7 @@ mod tests {
             "run",
             "mcp",
             "intent",
+            "note",
             "claim",
             "status",
             "install",

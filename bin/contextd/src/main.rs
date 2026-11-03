@@ -30,6 +30,45 @@ struct Tiers {
     graph: memory::SharedGraph,
 }
 
+async fn store_ingested(
+    event: RawEvent,
+    session_id: &str,
+    store: &Store,
+    working: &memory::WorkingSet,
+    graph: &memory::SharedGraph,
+    enrichment: &background::enrichment::EnrichmentQueue,
+) -> bool {
+    let processed_event = pipeline::heuristics::process_event(event).with_session(session_id);
+    if pipeline::decision::should_drop(&processed_event) {
+        debug!(
+            event_id = processed_event.raw.id.as_str(),
+            "skipped as noise before storage"
+        );
+        return false;
+    }
+    {
+        let conn = store.writer().await;
+        if let Err(err) = store::db::insert_event(&conn, &processed_event) {
+            error!("Failed to write event to database: {err}");
+            return false;
+        }
+        let has_exit = processed_event.raw.source == EventSource::Shell
+            && processed_event
+                .raw
+                .payload
+                .get("exit_code")
+                .and_then(|value| value.as_i64())
+                .is_some();
+        if has_exit && let Err(err) = memory::project::rebuild(&conn) {
+            error!("Failed to rebuild working-state projection: {err}");
+        }
+    }
+    working.record(processed_event.clone());
+    graph.observe(&processed_event).await;
+    enrichment.offer(&processed_event.raw.id);
+    true
+}
+
 /// Serve one agent request. Always returns a JSON body: errors are reported in
 /// band as `{"error": ...}` so a caller never has to guess why the line is short.
 async fn answer_query(
@@ -321,6 +360,7 @@ async fn main() -> anyhow::Result<()> {
         // background; this process only asks it for the briefing.
         cli::Command::Mcp => mcp::stdio::run(config.socket_path).await,
         cli::Command::Intent(text) => cli::run_intent(&config, &text).await,
+        cli::Command::Note(text) => cli::run_note(&config, &text),
         cli::Command::Claim(claim) => cli::run_claim(&config, claim).await,
         cli::Command::Status => cli::run_status(&config).await,
         cli::Command::Install => cli::run_install(&config),
@@ -399,6 +439,7 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
     let socket_path = config.socket_path.clone();
     let listener_tx = tx.clone();
     let (query_tx, mut query_rx) = tokio::sync::mpsc::channel::<sources::shell::ContextQuery>(32);
+    let (note_tx, mut note_rx) = tokio::sync::mpsc::channel::<sources::shell::StoredNote>(32);
     let query_tiers = tiers.clone();
     let snapshot_ollama = ollama.clone();
     tokio::spawn(async move {
@@ -416,7 +457,7 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
 
     tokio::spawn(async move {
         if let Err(e) =
-            sources::shell::start_shell_listener(socket_path, listener_tx, query_tx).await
+            sources::shell::start_shell_listener(socket_path, listener_tx, query_tx, note_tx).await
         {
             error!("Shell listener crashed: {}", e);
         }
@@ -470,57 +511,46 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
     info!("Daemon is running and listening for events.");
 
     loop {
-        match rx.recv().await {
-            Ok(event) => {
-                let processed_event =
-                    pipeline::heuristics::process_event(event).with_session(&session_id);
-                debug!(
-                    "Received event from {:?}: {} score={} payload={}",
-                    processed_event.raw.source,
-                    processed_event.raw.id,
-                    processed_event.score,
-                    processed_event.raw.payload
-                );
-
-                if pipeline::decision::should_drop(&processed_event) {
-                    debug!(
-                        event_id = processed_event.raw.id.as_str(),
-                        "skipped as noise before storage"
-                    );
-                    continue;
-                }
-
-                // No model I/O on the hot path. Noise is refused here because
-                // working memory and the graph cannot retract a Drop.
-                {
-                    let conn = store.writer().await;
-                    if let Err(e) = store::db::insert_event(&conn, &processed_event) {
-                        error!("Failed to write event to database: {}", e);
-                        continue;
+        tokio::select! {
+            event = rx.recv() => {
+                match event {
+                    Ok(event) => {
+                        store_ingested(
+                            event,
+                            &session_id,
+                            store.as_ref(),
+                            &working,
+                            &graph,
+                            &enrichment,
+                        )
+                        .await;
                     }
-                    let has_exit = processed_event.raw.source
-                        == contextd_core::event::EventSource::Shell
-                        && processed_event
-                            .raw
-                            .payload
-                            .get("exit_code")
-                            .and_then(|value| value.as_i64())
-                            .is_some();
-                    if has_exit && let Err(e) = memory::project::rebuild(&conn) {
-                        error!("Failed to rebuild working-state projection: {e}");
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        error!("Database writer is too slow! Missed {} events.", missed);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        error!("Event bus closed unexpectedly. Shutting down.");
+                        break;
                     }
                 }
-
-                working.record(processed_event.clone());
-                graph.observe(&processed_event).await;
-                enrichment.offer(&processed_event.raw.id);
             }
-            Err(broadcast::error::RecvError::Lagged(missed)) => {
-                error!("Database writer is too slow! Missed {} events.", missed);
-            }
-            Err(broadcast::error::RecvError::Closed) => {
-                error!("Event bus closed unexpectedly. Shutting down.");
-                break;
+            note = note_rx.recv() => {
+                let Some(note) = note else { continue };
+                let stored = store_ingested(
+                    note.event,
+                    &session_id,
+                    store.as_ref(),
+                    &working,
+                    &graph,
+                    &enrichment,
+                )
+                .await;
+                let reply = if stored {
+                    Ok(())
+                } else {
+                    Err("the note was not stored".to_string())
+                };
+                let _ = note.reply.send(reply);
             }
         }
     }

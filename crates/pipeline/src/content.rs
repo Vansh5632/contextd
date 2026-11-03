@@ -49,6 +49,7 @@ pub fn summarize(event: &RawEvent) -> Option<String> {
         EventSource::Manifest => summarize_manifest(event),
         EventSource::Editor => None,
         EventSource::Claim => None,
+        EventSource::Note => None,
     }?;
 
     let summary = collapse_whitespace(&summary);

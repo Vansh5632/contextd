@@ -16,6 +16,12 @@ pub struct ContextQuery {
     pub reply: oneshot::Sender<String>,
 }
 
+/// A note that must be stored before the client is told it landed.
+pub struct StoredNote {
+    pub event: RawEvent,
+    pub reply: oneshot::Sender<Result<(), String>>,
+}
+
 #[derive(Debug)]
 pub enum InboundLine {
     Empty,
@@ -86,6 +92,7 @@ pub async fn start_shell_listener(
     socket_path: PathBuf,
     tx: broadcast::Sender<RawEvent>,
     query_tx: mpsc::Sender<ContextQuery>,
+    note_tx: mpsc::Sender<StoredNote>,
 ) -> Result<()> {
     let listener = bind_private_listener(&socket_path)?;
     info!("Shell listener bound at {}", socket_path.display());
@@ -97,9 +104,10 @@ pub async fn start_shell_listener(
             .context("failed to accept socket client")?;
         let tx = tx.clone();
         let query_tx = query_tx.clone();
+        let note_tx = note_tx.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = handle_client(stream, tx, query_tx).await {
+            if let Err(err) = handle_client(stream, tx, query_tx, note_tx).await {
                 warn!("shell client connection failed: {err}");
             }
         });
@@ -110,6 +118,7 @@ async fn handle_client(
     stream: UnixStream,
     tx: broadcast::Sender<RawEvent>,
     query_tx: mpsc::Sender<ContextQuery>,
+    note_tx: mpsc::Sender<StoredNote>,
 ) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -122,8 +131,28 @@ async fn handle_client(
         match parse_inbound_line(&line)? {
             InboundLine::Empty => {}
             InboundLine::Event(event) => {
-                tx.send(event)
-                    .map_err(|err| anyhow::anyhow!("failed to publish raw event: {err}"))?;
+                if event.source == contextd_core::event::EventSource::Note {
+                    let (ack_tx, ack_rx) = oneshot::channel();
+                    note_tx
+                        .send(StoredNote {
+                            event,
+                            reply: ack_tx,
+                        })
+                        .await
+                        .map_err(|err| anyhow::anyhow!("failed to dispatch note: {err}"))?;
+                    let stored = ack_rx
+                        .await
+                        .unwrap_or_else(|_| Err("note handler unavailable".to_string()));
+                    let body = match stored {
+                        Ok(()) => "{\"stored\":true}\n",
+                        Err(_) => "{\"stored\":false}\n",
+                    };
+                    writer.write_all(body.as_bytes()).await?;
+                    writer.flush().await?;
+                } else {
+                    tx.send(event)
+                        .map_err(|err| anyhow::anyhow!("failed to publish raw event: {err}"))?;
+                }
             }
             InboundLine::Query(request) => {
                 let (reply_tx, reply_rx) = oneshot::channel();
@@ -363,6 +392,21 @@ mod tests {
     }
 
     #[test]
+    fn note_line_is_ingested() {
+        let line = r#"{"source":"note","payload":{"session":"live","text":"Decision: idle connections count toward the cap."}}"#;
+        match parse_inbound_line(line).unwrap() {
+            InboundLine::Event(event) => {
+                assert_eq!(event.source, contextd_core::event::EventSource::Note);
+                assert_eq!(
+                    event.payload["text"],
+                    "Decision: idle connections count toward the cap."
+                );
+            }
+            other => panic!("expected an event, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn claim_events_cannot_be_ingested_over_the_socket() {
         let err = parse_inbound_line(
             r#"{"source":"claim","payload":{"op":"assert","claim_id":"c_x","task_id":"t_x","origin":"user"}}"#,
@@ -379,6 +423,7 @@ mod tests {
         let (client, server) = UnixStream::pair().unwrap();
         let (event_tx, _) = broadcast::channel(8);
         let (query_tx, mut query_rx) = mpsc::channel::<ContextQuery>(8);
+        let (note_tx, _note_rx) = mpsc::channel::<StoredNote>(1);
 
         tokio::spawn(async move {
             let req = query_rx.recv().await.expect("query should arrive");
@@ -386,7 +431,7 @@ mod tests {
             let _ = req.reply.send(r#"{"recent_activity":[]}"#.to_string());
         });
         tokio::spawn(async move {
-            handle_client(server, event_tx, query_tx)
+            handle_client(server, event_tx, query_tx, note_tx)
                 .await
                 .expect("server should handle query");
         });

@@ -35,7 +35,7 @@ leak_terms = "gold/leak_terms.yaml"
 
 # Context-packet arms (harness.arms). Token counts use the tiktoken encoding below.
 [arms]
-names = ["none", "raw", "summary", "oracle", "stale-only", "contextd", "contextd-new"]
+names = ["none", "raw", "summary", "oracle", "stale-only", "contextd", "contextd-new", "contextd-component2"]
 raw_budget_tokens = 8192
 tokenizer = "o200k_base"
 

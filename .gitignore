@@ -24,3 +24,12 @@ Cargo.lock
 
 # Local secrets
 .env
+
+# Agent implementation plans. Local only.
+docs/superpowers/
+
+# Generated Component 2 briefing. The score note is docs/component-2-validation.md.
+eval/component0/episodes/**/packets/contextd_component2.txt
+eval/component0/episodes/**/packets/contextd_component2_claims.json
+eval/component0/episodes/**/packets/contextd_component2_report.json
+eval/component0/episodes/**/packets/contextd_component2_events.jsonl
