@@ -1,144 +1,103 @@
 # Component 2 design
 
-Design for the extractor that feeds Component 1, including the live daemon path added on 3 November 2026. The measurements are in `docs/component-2-validation.md`.
+Design for the smallest extractor that can feed Component 1. Written 2 November 2026 from `docs/component-2-research.md`. The measurements that follow this design are in `docs/component-2-validation.md`.
 
 ## Decision
 
-At a handoff, read the daemon event log. Notes are `source: note`. Command output is `payload.output` on a shell event. Quote a note when it is a load-bearing speech act, when it is a conclusion grounded in a cited tool result, or when a user note states a normative rule. Admit the quote through Component 1's claim validator and fold. Render with the existing `context_now` projector.
+At a handoff, read the daemon event log. Notes are `source: note`. Command output is `payload.output` on the shell event. Quote a note only when it is a load-bearing speech act, or when it is a conclusion grounded in the immediately preceding shell output. Admit the quote through Component 1's existing claim validator and fold. Render with the existing `context_now` projector.
 
-Do not add a memory store, a retriever, a compactor, or a pager. Do not change the fold in `crates/memory/src/project.rs` or the renderer in `crates/broker/src/snapshot.rs`. The selection contract stays: one task per shell command, the latest exit is the reality, the oldest non-zero exit is focal, a commit does not outrank it, exit 0 supersedes that failure, authored claims survive a rebuild.
+Do not add a memory store, a retriever, a compactor, or a pager. Do not change `crates/memory/src/project.rs` or `crates/broker/src/snapshot.rs`. The frozen selection contract stays: one task per shell command, the latest exit is the reality, the oldest non-zero exit is focal, a commit does not outrank it, exit 0 supersedes that failure, authored claims survive a rebuild.
 
-Extraction does not run on the shell hook and does not run while a command is still executing. The daemon runs it at startup, after a note is stored, and before `context_now`.
+The extractor is a separate binary, `project_claims`, and a Python proposer, `eval/component0/harness/extract_claims.py`. Neither runs while a command is executing.
 
 ## Why this shape
 
-The required atoms on limiter-handoff are sentences in Session A's notes. They are not in the 31 shell events. An extractor that sees only those events has nothing to quote, which is why Component 1's recall is 0. An LLM rewrite is not required to recover sentences that are already explicit, and it is the step that can add a fact the note did not say. The rule is: quote, or abstain.
+The required atoms on limiter-handoff are sentences in Session A's notes. They are not in the 31 shell events. An extractor that sees only those events has nothing to quote, which is why Component 1's recall is 0. An LLM rewrite is not required to recover sentences that are already explicit, and it is the step that can add a fact the note did not say. Claimify's result (99% of claims entailed by the source sentence, inferred context bracketed) is the rule: quote, or abstain.
 
-A coding agent does not type its tool calls into an interactive shell. The bash hook in `crates/sources/src/install.rs` still records command, exit code, and directory, and still does not see Codex or Cursor tool calls. Those observations enter through one narrow adapter, `eval/component0/harness/agent_observe.py`, and the `observe` request on the daemon socket. The adapter records a tool result as a shell event that includes output, and the agent's own message as a note. It does not admit claims.
+Mem0's paper deletes a contradicted memory by asking a model. contextd already supersedes a claim by status. SeCom's segment summary is a second briefing. ACE's useful idea is the delta merged by a non-LLM curator. The curator here is the projector.
 
 ## Pipeline
 
 ```text
-coding-agent trace                         interactive note / speech-act note
-        │                                          │
-        ▼                                          ▼
-agent_observe.adapt_trace                  contextd note  /  shell hook
-        │                                          │
-        ▼                                          ▼
-observe request on the socket              source:note or source:shell
-        │                                          │
-        └──────────────┬───────────────────────────┘
-                       ▼
-              SQLite event log
-                       │
-                       ▼  startup, after a note, or before context_now
-              broker::extract::run_handoff
-                       │  quote, or record a skip reason
-                       ▼
-              ClaimEvent::validate + validate_against_projection
-                       │
-                       ▼
-              source:claim rows on the same log
-                       │
-                       ▼
-              memory::project::fold  →  broker::snapshot::render
-                       │
-                       ▼
-                    context_now
+event log (shell events with output, note events)
+  ← import_trajectory (this episode's saved transcript → log)
+        │
+        ▼
+extract_claims.py          quote, or record a skip reason
+                           (does not open the saved transcript)
+        │
+        ▼
+project_claims             verbatim check, grounding check,
+                           ClaimEvent::validate, then fold + render
+        │
+        ▼
+claim events on the same log
+        │
+        ▼
+Component 1 projector  →  context_now
 ```
 
-The offline episode path is the same gate. `eval/component0/harness/extract_claims.py` still proposes the limiter-handoff quotes, and `project_claims` admits them. `project_claims --extract` runs the Rust quoter, which is what the daemon runs. A parity test requires the two quoters to emit the same kind, text, and confidence on that episode.
-
-The gold file and the oracle packet are not inputs. Tests read the proposer, the Rust gate, and the adapter, and fail if any of them names `atoms.yaml`, `oracle.txt`, or `gold/`.
+The gold file and the oracle packet are not inputs. A test reads the proposer and the gate and fails if either names `atoms.yaml`, `oracle.txt`, or `gold/`.
 
 ## What triggers extraction
 
-Not after every tool call, and not on the shell hook. Three moments, all off the path that records a command:
+Once, at the handoff, on a finished trajectory. Not after every tool call, and not on the shell hook. This episode is one checkpoint: Session A is unfinished because its pytest is still non-zero, and Session B is left off the page because every command there ended at 0.
 
-1. Daemon startup, after the projection rebuild, so a crash before the next query still leaves claims in the log once the process is up.
-2. After `contextd note` has been stored and acknowledged.
-3. At the start of `context_now` and of `contextd handoff`, so a fresh agent cannot read a page that is behind the notes.
-
-`observe` only stores the tool event or the note. The successor's `context_now` is the handoff. Running it again is safe: a note that already supports a claim is not inserted twice.
+A later live system can run the same function when a session is interrupted. It should still be off the path that records the command.
 
 ## Observation, statement, inference
 
 | What was said or seen | Kind | Origin | Confidence |
 |---|---|---|---|
 | Shell exit code, written by the projector | reality | projector | observed |
-| A note that contains "Constraint" and states a rule | constraint | user | stated |
-| A user note (`speaker: user`) with a normative sentence, even without the word "Constraint" | constraint | user | stated |
+| A note that starts with "Constraint" and states a rule | constraint | user | stated |
 | "Decision:" | decision | agent | inferred |
 | "Ruled out" or "Rejected" | ruled_out | agent | inferred |
 | "Next step" | next_action | agent | inferred |
 | "out of scope" | unknown | agent | hypothesis |
 | A note immediately after `sed` or `grep`, with at least two content words in that output | reality | agent | inferred |
-| A `role: conclusion` sentence with at least two content words in the cited tool output | reality | agent | inferred |
-| A conclusion that says the cited output "is not the cause" (or "not involved" / "not the problem") and overlaps it | ruled_out | agent | inferred |
-| A conclusion that starts with "I'll" or "I will" | next_action | agent | inferred |
-| A conclusion that says "might", "maybe", "not sure", or "could be" | unknown | agent | hypothesis |
 | "First suspect", "Next suspect", "Idea" | not written |  | open hypothesis |
-| Narration, or a conclusion that does not overlap the cited output | not written |  | no speech act |
+| Narration ("Picking up", "Fails as reported") | not written |  | no speech act |
 
-The gate refuses `observed` on any extracted claim. The string is `an extracted claim cannot be marked observed` in `crates/broker/src/extract.rs`. The only observed claim in a limiter-handoff packet is the projector's `exited 1`.
+The gate refuses `observed` on any extracted claim. The only observed claim in the packet is the projector's `exited 1`. An inferred conclusion is not relabelled as something the tool printed.
 
-`role: conclusion` is not a speech-act prefix in the sentence. The adapter sets it because the event is the agent's message rather than a scratch note. Limiter-handoff notes do not carry the field, so their quotes stay the speech-act and `sed`/`grep` rules.
+Constraints are `user` / `stated` because `validate` in `crates/core/src/claim.rs` rejects an agent constraint and rejects a user claim that is not `stated`. That is the frozen write rule, not the selection contract. The evidence id still points at the note, so the page does not pretend a person typed `contextd claim`. Loosening the rule was not required: the sentence fits the existing slot.
 
-Constraints are `user` / `stated` because `validate` in `crates/core/src/claim.rs` rejects an agent constraint and rejects a user claim that is not `stated`. The evidence id still points at the note.
-
-A next-step quote uses the frontier subject. Component 1 keeps one current next action per task, so the quote replaces `Re-run and inspect:` without an edit to the fold. The failing reality stays, and it stays focal.
+The next-step note uses the frontier subject. Component 1 already keeps one current next action per task, so the quote replaces `Re-run and inspect:` without an edit to the fold. The failing reality stays, and it stays focal. A later non-zero exit will not overwrite a non-projector frontier; `ensure_projector_frontier` already returns in that case. This episode has no later failure of that pytest, so the interaction is not exercised.
 
 ## How a fabricated claim is refused
 
 A candidate is admitted only if all of these hold:
 
-1. Its text is a verbatim substring of one note, and `source_text` is that whole note.
+1. Its text is a verbatim substring of one note.
 2. The text is between 1 and 500 characters.
-3. It has at least one evidence id, and every id is in the log. The first id is a note.
-4. It is attached to the task subject of a command that is still failing (`cwd` plus the command, the same string the projector hashes).
-5. An inferred reality cites a shell event. If `support_text` is set, it equals that event's `payload.output`. The claim and the output share at least two content words of four or more characters, after the stop list.
+3. It has at least one evidence id.
+4. It is attached to the task subject of the command that is still failing (`cwd` plus the command, the same string the projector hashes).
+5. An inferred reality cites the preceding tool output and shares at least two content words of four or more characters with it, after a small stop list.
 6. `validate` and `validate_against_projection` accept the origin, kind, and confidence.
 7. The same kind and collapsed text have not already been admitted.
 
-Open suspects are skipped, not stored as current. A note in a session whose commands all ended at 0 is skipped. A file-read note that does not overlap the output is skipped. A conclusion that does not overlap, and is not an explicit hypothesis or next step, is skipped. Nothing is truncated to fit the length cap.
+Open suspects are skipped, not stored as current. A note in a session whose commands all ended at 0 is skipped. A file-read note that does not overlap the output is skipped. Nothing is truncated to fit the length cap; an overlong sentence would be skipped rather than cut.
 
-Tool output stored by `observe` is truncated at 200 lines or 8,000 characters, with an `[output truncated]` mark. That is the same cap as `import_trajectory.truncate_output`. The quote is checked against the stored text, not against a longer buffer the gate never saw.
+There is no model in this path, so the extraction adds no tokens to the predecessor's run.
 
 ## Provenance
 
-Every extracted claim's first evidence id is the note. A grounded reality or a grounded ruling also cites the shell event whose `payload.output` supports it. The projector's pytest reality keeps the shell event id it already had. Notes stay `source: note`. They are loaded by `store::db::get_handoff_events` and are not loaded by `get_fold_events`, so a note cannot open a task by itself.
+Every extracted claim's evidence id is the daemon event id. For this episode the importer mints `h_<session>_<unit>`. A grounded reality also cites the shell event whose `payload.output` supports it. The projector's pytest reality keeps the shell event id it already had. Notes are `source: note` events on the log. The test checks that a note id resolves to an event whose text contains the claim, and that a shell id cited by a reality overlaps that event's `payload.output`.
 
 ## Duplicates, contradictions, supersession
 
-Duplicates of the same kind and collapsed text are skipped, including on a second handoff.
+Duplicates of the same kind and text are dropped. An open hypothesis is not written, so there is no current "first suspect" left beside the later ruling. The Redis idea is not written. The rejection is written, and its text contains "Rejected", which is the episode's superseded marker. The scorer then counts it as marked stale rather than stale-as-current. The projector's own supersession of a shell exit is untouched.
 
-An open hypothesis is not written. Two conclusions that contradict each other and do not retract each other both stay current, on different subjects. Reality is unique per subject, and an extracted reality's subject is its claim id, so one finding does not erase the other or the exit code.
-
-An explicit retract is a note whose role is `retract` or whose text starts with "Retract". It must contain the current claim's text verbatim. The longest match is superseded. The claim stays in the log with status superseded. A retract does not invent a replacement. An observed projector reality cannot be retracted; the command has to be re-run.
-
-An explicit update is a note whose role is `update` and whose `replaces_text` equals a current claim. The replacement is admitted only if it would pass the same gate. If it would not, the old claim stays. There is no silent overwrite of a claim the new sentence does not name.
-
-The next-action slot is the one place an extracted claim replaces another current claim without naming it. That is the Component 1 frontier rule, and it is how `I'll ...` or `Next step` replaces `Re-run and inspect:`.
-
-## Where the code lives
-
-| Piece | Path |
-|---|---|
-| Quote, admit, retract, update, handoff | `crates/broker/src/extract.rs` |
-| Offline candidate gate and `--extract` | `crates/broker/src/bin/project_claims.rs` |
-| Notes excluded from the projector fold | `crates/store/src/db.rs` `get_fold_events`, `get_handoff_events` |
-| Socket verbs `observe` and `handoff` | `crates/core/src/protocol.rs`, `bin/contextd/src/main.rs`, `bin/contextd/src/cli.rs` |
-| Coding-agent adapter | `eval/component0/harness/agent_observe.py` |
-| Speech-act proposer for the frozen episode | `eval/component0/harness/extract_claims.py` |
-| Second episode, natural sentences | `eval/component0/episodes/retry-budget/trajectory.jsonl` |
+Two current claims can describe different things without being duplicates. The pytest reality and the idle-count finding are both current realities, with different subjects, so the unique slot does not let the finding erase the exit code.
 
 ## Cost
 
-The handoff reads the log and writes claim rows. It does not call a model. On the retry-budget trajectory, `project_claims --extract` finished in 0.095s with a warm binary, including process start. The limiter-handoff page is 1,032 tiktoken tokens (`o200k_base`) and the daemon estimate is 1,015, inside the 1,500-token render budget, so the renderer does not trim a constraint or the decision.
+The admission binary on this episode finishes in well under a tenth of a second and calls no model. The placed packet is larger than the oracle (1,030 tiktoken tokens against 381) because the quotes are the notes, plus evidence ids, plus the observed pytest line. It is inside the 1,500-token render budget, so the renderer does not trim a constraint or the decision.
 
 ## Measurement
 
-Same forced-placement protocol as Component 1 for the agent matrix. Arms:
+Same forced-placement protocol as Component 1. Same model, Codex version, seed, workspace tar, and budgets. Arms:
 
 | Arm in the report | What it is |
 |---|---|
@@ -148,22 +107,29 @@ Same forced-placement protocol as Component 1 for the agent matrix. Arms:
 | `contextd-new` | Component 1, the observation-only claim briefing |
 | `contextd-component2` | this extractor's packet |
 
-`contextd-component2.txt` is generated and gitignored. `harness.arms` does not put it in the frozen manifest, so `arms check` does not depend on whether the file exists. Frozen hashes of history, raw, summary, oracle, stale-only, atoms, prompt, wrapper, and `contextd.txt` are unchanged. A trial may still place the generated arm: `build_prompt` accepts it when the arm is in `GENERATED_ARMS` and the packet file is present.
+`contextd-new` is the Component 1 arm. A second copy of that packet was not added under another name.
 
-Score, before any agent runs: required-atom recall and precision, stale-as-current, whether a rejected line is marked, whether an unresolved note is present, and that no extracted claim is `observed`. Then the agent matrix: solved rate, turns to the first on-frontier action, repeated work, forbidden actions, constraint violations, total tokens. The gold file is used only by the scorer, after the packet exists.
+Score, before any agent runs: required-atom recall and precision, stale-as-current, whether the Redis line is marked, whether the keepalive note is present, and that no extracted claim is `observed`. Then the agent matrix: solved rate, turns to the first on-frontier action, repeated work, forbidden actions, constraint violations, total tokens, and the paired delta against `none`. The gold file is used only by the scorer, after the packet exists.
 
 ## Out of scope
 
-- Capturing stdout from the interactive shell hook. Coding-agent tool calls do not travel through that hook. A sender that already has the output uses `observe`.
-- An LLM pass for sentences that are neither speech acts nor grounded conclusions.
-- Context paging, compaction, or a second briefing.
+- Teaching the shell hook to capture stdout or notes. A later plan can attach `output` at the moment a command runs. This plan records output when the event is written by the importer or by a sender that already has the text.
+- An LLM pass for sentences that are not speech acts.
+- Session B's finished host-header work.
 - Changing focus, retrieval, or what happens to a decision after the task is marked done.
-- Session B's finished host-header work on limiter-handoff.
 
-## Limitations
+## Unresolved before the run
 
-- Dedup is identical kind and collapsed text, not a paraphrase match.
-- A conclusion the adapter did not mark, and that does not use a speech-act prefix, is skipped. `contextd note` of an ordinary sentence does not become a claim.
-- "I'll" and "might" are the natural next-step and hypothesis cues. Other wordings abstain.
-- A handoff is not one SQLite transaction around every sentence of a note. A crash mid-pass can leave the first sentence cited and the rest unwritten until a later note.
-- The shell hook still does not store stdout. A grounded reality needs output from `observe` or from the trajectory importer.
+Whether a packet with recall 1 and about 1,030 tokens would move the successor's tokens toward the oracle, or only move the packet score. That is the validation.
+
+## Live handoff, 3 November 2026
+
+The quoter and the gate live in `crates/broker/src/extract.rs`. The daemon runs `run_handoff` at startup, after `contextd note`, and before `context_now`. It does not run on the shell hook. Admitted rows are `source: claim`. `get_fold_events` still loads only shell and claim, so a note cannot open a task. `get_handoff_events` is what the quoter reads.
+
+Coding-agent tool calls do not pass through the bash hook. `eval/component0/harness/agent_observe.py` and the `observe` socket request record a tool result as a shell event with output, and the agent's message as a note with `role: conclusion`. `contextd handoff` runs the same function.
+
+A `role: conclusion` sentence is quoted only when it overlaps the cited tool output by two content words (inferred reality), says the output is not the cause (ruled out), starts with "I'll" or "I will" (next action), or says "might", "maybe", "not sure", or "could be" (hypothesis). A user note with a normative sentence is a stated constraint. Anything else is skipped. Extracted claims are never `observed`.
+
+A later conclusion does not replace an earlier one unless the note starts with "Retract" or its role is `retract` or `update`, and it quotes the current claim. An update is admitted only when the replacement itself passes the gate. The frontier next-action slot is the Component 1 exception: one current next action per task.
+
+`contextd-component2.txt` stays gitignored. `harness.arms` keeps it out of the frozen manifest, so `arms check` does not depend on that file. Frozen hashes are unchanged. `build_prompt` still places the arm.
