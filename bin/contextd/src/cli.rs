@@ -21,6 +21,8 @@ COMMANDS:
     mcp                 Speak MCP over stdio. This is what an agent launches.
     intent <TEXT>       Record what you are working on
     note <TEXT>          Record a sentence for a later handoff. This does not file a claim.
+    observe <JSON>      Record one coding-agent tool call or conclusion
+    handoff             Extract and admit claims from the stored trajectory
     claim constraint <TEXT>
     claim decision <TEXT>
     claim ruled-out <TEXT>
@@ -76,6 +78,8 @@ pub enum Command {
     Mcp,
     Intent(String),
     Note(String),
+    Observe(String),
+    Handoff,
     Claim(ClaimCommand),
     Status,
     Install,
@@ -118,6 +122,16 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             }
             Command::Note(text)
         }
+        "observe" => {
+            let body = args[1..].join(" ");
+            if body.trim().is_empty() {
+                return Err("observe needs a JSON object, e.g. \
+                            `contextd observe '{\"kind\":\"conclusion\",\"text\":\"...\"}'`"
+                    .to_string());
+            }
+            Command::Observe(body)
+        }
+        "handoff" => Command::Handoff,
         "claim" => parse_claim(&args[1..])?,
         other => return Err(format!("unknown command `{other}`. Try `contextd help`.")),
     })
@@ -206,6 +220,36 @@ pub fn run_note(config: &AppConfig, text: &str) -> anyhow::Result<()> {
 
     println!("Noted.");
     Ok(())
+}
+
+/// Record one coding-agent observation. The JSON is an `observe` request body.
+pub async fn run_observe(config: &AppConfig, body: &str) -> anyhow::Result<()> {
+    let mut value: serde_json::Value = serde_json::from_str(body)
+        .map_err(|err| anyhow::anyhow!("observe expects one JSON object: {err}"))?;
+    if value.get("query").is_none() {
+        value["query"] = serde_json::json!("observe");
+    }
+    let request: ContextRequest = serde_json::from_value(value)
+        .map_err(|err| anyhow::anyhow!("observe payload was refused: {err}"))?;
+    forward(config, &request).await
+}
+
+/// Quote the stored trajectory and admit the claims that pass the gate.
+pub async fn run_handoff(config: &AppConfig) -> anyhow::Result<()> {
+    forward(config, &ContextRequest::Handoff).await
+}
+
+async fn forward(config: &AppConfig, request: &ContextRequest) -> anyhow::Result<()> {
+    match mcp::daemon::ask(&config.socket_path, request).await {
+        Ok(body) => {
+            println!("{body}");
+            Ok(())
+        }
+        Err(err) => Err(anyhow::anyhow!(
+            "could not reach the daemon at {}: {err}\nIs contextd running?",
+            config.socket_path.display()
+        )),
+    }
 }
 
 pub async fn run_claim(config: &AppConfig, command: ClaimCommand) -> anyhow::Result<()> {
@@ -527,6 +571,8 @@ mod tests {
             "mcp",
             "intent",
             "note",
+            "observe",
+            "handoff",
             "claim",
             "status",
             "install",

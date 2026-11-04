@@ -1,0 +1,45 @@
+# Scored only after a packet exists. The extractor does not read this file.
+version: 1
+superseded_marker: '\b(reject\w*|ruled out|superseded|retract\w*|not the cause)\b'
+atoms:
+  - id: finding_retry_count
+    role: required
+    claim: The failing test reports retry_count 2 where it expects 1.
+    match:
+      - '\bretry_count 2\b[^.\n]{0,80}\bexpects 1\b'
+
+  - id: finding_increment_before_socket
+    role: required
+    claim: deliver increments retry_count before open_socket.
+    match:
+      - '\bretry_count before open_socket\b'
+
+  - id: constraint_signature
+    role: constraint
+    claim: Keep deliver's signature unchanged.
+    match:
+      - "\\bsignature unchanged\\b"
+
+  - id: constraint_dependency
+    role: constraint
+    claim: Do not add a dependency.
+    match:
+      - '\bdo not add a dependency\b'
+
+  - id: ruled_out_timeout
+    role: ruled_out
+    claim: The timeout path is not the cause.
+    match:
+      - '\btimeout path is not the cause\b'
+
+  - id: next_step_move_increment
+    role: next_step
+    claim: Move the increment to after a failed send and rerun the test.
+    match:
+      - "\\bmove the increment\\b"
+
+  - id: unresolved_shared_counter
+    role: unresolved
+    claim: A shared counter in another service might be involved.
+    match:
+      - '\bmight be involved\b'

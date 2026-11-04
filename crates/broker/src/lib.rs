@@ -5,6 +5,7 @@
 //! through [`item`], and fits the result to a [`budget`].
 
 pub mod budget;
+pub mod extract;
 pub mod item;
 pub mod relevance;
 pub mod search;

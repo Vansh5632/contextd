@@ -74,18 +74,65 @@ async fn store_ingested(
 async fn answer_query(
     tiers: &Tiers,
     ollama: Option<&ai::ollama::OllamaClient>,
+    enrichment: &background::enrichment::EnrichmentQueue,
+    session_id: &str,
     request: ContextRequest,
 ) -> String {
     let store = tiers.store.as_ref();
 
     let result = match &request {
-        ContextRequest::Now { text: _ } => broker::snapshot::build(
-            broker::snapshot::SnapshotRequest::new(store, "")
-                .with_ollama(ollama)
-                .with_tiers(Some(&tiers.working), Some(&tiers.graph)),
-        )
-        .await
-        .and_then(|snapshot| Ok(serde_json::to_value(snapshot)?)),
+        ContextRequest::Now { text: _ } => {
+            {
+                let conn = tiers.store.writer().await;
+                if let Err(error) = broker::extract::run_handoff(&conn) {
+                    error!("handoff before context_now failed: {error}");
+                }
+            }
+            broker::snapshot::build(
+                broker::snapshot::SnapshotRequest::new(store, "")
+                    .with_ollama(ollama)
+                    .with_tiers(Some(&tiers.working), Some(&tiers.graph)),
+            )
+            .await
+            .and_then(|snapshot| Ok(serde_json::to_value(snapshot)?))
+        }
+        ContextRequest::Observe {
+            kind,
+            session,
+            command,
+            cwd,
+            exit_code,
+            output,
+            text,
+            support_event_id,
+            replaces_text,
+        } => {
+            record_observation(
+                tiers,
+                enrichment,
+                session_id,
+                broker::extract::Observation {
+                    kind: *kind,
+                    session: session.clone(),
+                    command: command.clone(),
+                    cwd: cwd.clone(),
+                    exit_code: *exit_code,
+                    output: output.clone(),
+                    text: text.clone(),
+                    support_event_id: support_event_id.clone(),
+                    replaces_text: replaces_text.clone(),
+                    id: mint_event_id(),
+                    timestamp_ms: now_ms(),
+                },
+            )
+            .await
+        }
+        ContextRequest::Handoff => {
+            let conn = tiers.store.writer().await;
+            broker::extract::run_handoff(&conn)
+                .map_err(anyhow::Error::from)
+                .and_then(|report| Ok(serde_json::to_value(report)?))
+        }
         ContextRequest::Search { text, limit } => {
             let limit = ContextRequest::resolve_limit(*limit);
             broker::search::search(store, ollama, text, limit)
@@ -161,6 +208,32 @@ fn write_ok(claim_id: &str, task_id: &str) -> anyhow::Result<serde_json::Value> 
 
 fn map_claim_err(error: ClaimError) -> anyhow::Error {
     anyhow::anyhow!(error.0)
+}
+
+async fn record_observation(
+    tiers: &Tiers,
+    enrichment: &background::enrichment::EnrichmentQueue,
+    session_id: &str,
+    observation: broker::extract::Observation,
+) -> anyhow::Result<serde_json::Value> {
+    let event_id = observation.id.clone();
+    let event = broker::extract::observation_event(observation).map_err(anyhow::Error::msg)?;
+    let stored = store_ingested(
+        event,
+        session_id,
+        tiers.store.as_ref(),
+        &tiers.working,
+        &tiers.graph,
+        enrichment,
+    )
+    .await;
+    if !stored {
+        anyhow::bail!("the observation was not stored");
+    }
+    Ok(serde_json::json!({
+        "stored": true,
+        "event_id": event_id,
+    }))
 }
 
 async fn record_user_intent(tiers: &Tiers, text: &str) -> anyhow::Result<serde_json::Value> {
@@ -361,6 +434,8 @@ async fn main() -> anyhow::Result<()> {
         cli::Command::Mcp => mcp::stdio::run(config.socket_path).await,
         cli::Command::Intent(text) => cli::run_intent(&config, &text).await,
         cli::Command::Note(text) => cli::run_note(&config, &text),
+        cli::Command::Observe(body) => cli::run_observe(&config, &body).await,
+        cli::Command::Handoff => cli::run_handoff(&config).await,
         cli::Command::Claim(claim) => cli::run_claim(&config, claim).await,
         cli::Command::Status => cli::run_status(&config).await,
         cli::Command::Install => cli::run_install(&config),
@@ -382,6 +457,9 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
         let conn = store.writer().await;
         if let Err(error) = memory::project::rebuild(&conn) {
             error!("Failed to rebuild working-state projection: {error}");
+        }
+        if let Err(error) = broker::extract::run_handoff(&conn) {
+            error!("Failed to extract claims at startup: {error}");
         }
     }
 
@@ -442,14 +520,25 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
     let (note_tx, mut note_rx) = tokio::sync::mpsc::channel::<sources::shell::StoredNote>(32);
     let query_tiers = tiers.clone();
     let snapshot_ollama = ollama.clone();
+    let query_enrichment = enrichment.clone();
+    let query_session = session_id.clone();
     tokio::spawn(async move {
         while let Some(req) = query_rx.recv().await {
             // Serve each query on its own task so a slow embedding call does
             // not hold up the next agent asking a question.
             let tiers = query_tiers.clone();
             let ollama = snapshot_ollama.clone();
+            let enrichment = query_enrichment.clone();
+            let session_id = query_session.clone();
             tokio::spawn(async move {
-                let body = answer_query(&tiers, ollama.as_ref(), req.request).await;
+                let body = answer_query(
+                    &tiers,
+                    ollama.as_ref(),
+                    &enrichment,
+                    &session_id,
+                    req.request,
+                )
+                .await;
                 let _ = req.reply.send(body);
             });
         }
@@ -545,6 +634,12 @@ async fn run_daemon(config: AppConfig) -> anyhow::Result<()> {
                     &enrichment,
                 )
                 .await;
+                if stored {
+                    let conn = store.writer().await;
+                    if let Err(error) = broker::extract::run_handoff(&conn) {
+                        error!("handoff after note failed: {error}");
+                    }
+                }
                 let reply = if stored {
                     Ok(())
                 } else {

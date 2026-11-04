@@ -30,6 +30,9 @@ from harness.packet_score import HISTORY_DELIMITER, PACKET_FILES, PACKET_KINDS, 
 CONTEXTD_ARM = "contextd"
 CONTEXTD_FREEZE_KEY = "contextd_txt"
 CONTEXTD_REL = "packets/contextd.txt"
+# Produced by the extractor and gitignored. The arm stays placeable, but a
+# fresh manifest must not depend on whether that file happens to exist.
+GENERATED_ARMS = frozenset({"contextd-component2"})
 _NAMES_RE = re.compile(
     r"^(?P<indent>[ \t]*)names[ \t]*=[ \t]*\[(?P<body>[^\]]*)\][ \t]*$", re.M
 )
@@ -146,7 +149,7 @@ def packet_files_for(names: tuple[str, ...]) -> dict[str, str]:
     return {
         arm: filename
         for arm, filename in PACKET_FILES.items()
-        if arm != CONTEXTD_ARM or arm in names
+        if arm not in GENERATED_ARMS and (arm != CONTEXTD_ARM or arm in names)
     }
 
 

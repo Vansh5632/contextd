@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -91,3 +92,33 @@ def test_frozen_raw_packet_fits_budget_and_keeps_newest() -> None:
 
 def test_arms_check_passes() -> None:
     assert arms.check(EPISODE_DIR) == []
+
+
+def test_generated_component2_packet_stays_out_of_the_freeze() -> None:
+    names = arms.load_config(EPISODE_DIR).names
+    assert "contextd-component2" in names
+    assert "contextd-component2" not in arms.packet_files_for(names)
+    packet = EPISODE_DIR / "packets" / "contextd_component2.txt"
+    created = False
+    if not packet.exists():
+        packet.parent.mkdir(exist_ok=True)
+        packet.write_text("{}\n")
+        created = True
+    try:
+        assert arms.check(EPISODE_DIR) == []
+    finally:
+        if created:
+            packet.unlink()
+
+
+def test_a_frozen_hash_mismatch_is_still_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    real = arms.file_hashes
+
+    def fake(episode_dir: Path) -> dict[str, str]:
+        hashes = real(episode_dir)
+        hashes["oracle_txt"] = "0" * 64
+        return hashes
+
+    monkeypatch.setattr(arms, "file_hashes", fake)
+    problems = arms.check(EPISODE_DIR)
+    assert any("oracle.txt" in problem for problem in problems)

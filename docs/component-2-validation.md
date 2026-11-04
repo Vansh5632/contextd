@@ -144,3 +144,21 @@ The placed page is 1,030 tokens because the quotes are whole notes. A shorter re
 ## 6. Answer
 
 contextd can preserve what this predecessor said, as typed claims with a confidence and a pointer back to the note or the tool output, and a later agent spends less of the investigation rediscovering it. The preservation is a quote of the trajectory, checked by the claim rules Component 1 already had. It is not a summary, and it is not a reading of the gold file. The human note is still the smaller page, and a live shell still does not carry the sentences the quote is made from.
+
+## 7. Live handoff, 3 November 2026
+
+Parent of the work is `c397bef`. Packet scores were recomputed with tiktoken `o200k_base` after `write_packet`. The Component 2 page is 1,032 tokens, daemon estimate 1,015, required recall 1.00, unit precision 0.90, stale-as-current 0, stale marked 1. The unmatched unit is the projector's `exited 1`. `none` 0, `summary` 170 / 0.14 / 0.75, `contextd-new` 318 / 0 / 0, `oracle` 381 / 1.00 / 1.00. The Rust quoter matches the Python proposer on kind, text, and confidence.
+
+`episodes/retry-budget` has no `Decision:` or `Ruled out:` prefixes. The adapter plus `project_claims --extract` admits 8 claims and 1 retract, rejects 0, skips the closed session, the session with no command, and the ungrounded sentence. Required recall 1.00, 503 tokens, unit precision 0.875. The retracted sentence is not current. A file-backed restart rebuilds the same snapshot; a second handoff inserts nothing.
+
+The 2 November agent prompt for this arm was `2bacd5d2b8b53764…`. Today's prompt is `81030c81a3caba32895b737cb90cdfa29ffe5f09f3d85bea4fac3d326aba964f`, so that run is not this packet. The matching run is `component2-2026-11-03`, 25/25, 2026-11-03T17:19:19Z to 17:42:13Z, 3,986,524 tokens, same image pins and seed as section 2.
+
+| Arm | Solved | Mean turns | Constraint | Forbidden | Repeated | Mean tokens |
+|---|---|---|---|---|---|---|
+| none | 1.00 | 11.40 | 0 | 0 | 0 | 232,248 |
+| summary | 1.00 | 4.00 | 0 | 0 | 0 | 200,962 |
+| oracle | 1.00 | 3.00 | 0 | 0 | 0 | 70,512 |
+| contextd-new | 1.00 | 5.80 | 0 | 0 | 0 | 172,197 |
+| contextd-component2 | 1.00 | 3.20 | 0 | 0 | 0 | 121,386 |
+
+Component 2 minus Component 1, paired, seed 20260930, 10,000 resamples: turns −2.6 [−3.0, −2.2], tokens −50,811 [−73,170, −28,453]. Versus the oracle: turns +0.2 [−0.4, +0.8], tokens +50,874 [+38,389, +63,152]. `cargo test --workspace --all-features` exited 0. `pytest tests` in `eval/component0` passed 256.

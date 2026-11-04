@@ -121,3 +121,15 @@ Score, before any agent runs: required-atom recall and precision, stale-as-curre
 ## Unresolved before the run
 
 Whether a packet with recall 1 and about 1,030 tokens would move the successor's tokens toward the oracle, or only move the packet score. That is the validation.
+
+## Live handoff, 3 November 2026
+
+The quoter and the gate live in `crates/broker/src/extract.rs`. The daemon runs `run_handoff` at startup, after `contextd note`, and before `context_now`. It does not run on the shell hook. Admitted rows are `source: claim`. `get_fold_events` still loads only shell and claim, so a note cannot open a task. `get_handoff_events` is what the quoter reads.
+
+Coding-agent tool calls do not pass through the bash hook. `eval/component0/harness/agent_observe.py` and the `observe` socket request record a tool result as a shell event with output, and the agent's message as a note with `role: conclusion`. `contextd handoff` runs the same function.
+
+A `role: conclusion` sentence is quoted only when it overlaps the cited tool output by two content words (inferred reality), says the output is not the cause (ruled out), starts with "I'll" or "I will" (next action), or says "might", "maybe", "not sure", or "could be" (hypothesis). A user note with a normative sentence is a stated constraint. Anything else is skipped. Extracted claims are never `observed`.
+
+A later conclusion does not replace an earlier one unless the note starts with "Retract" or its role is `retract` or `update`, and it quotes the current claim. An update is admitted only when the replacement itself passes the gate. The frontier next-action slot is the Component 1 exception: one current next action per task.
+
+`contextd-component2.txt` stays gitignored. `harness.arms` keeps it out of the frozen manifest, so `arms check` does not depend on that file. Frozen hashes are unchanged. `build_prompt` still places the arm.

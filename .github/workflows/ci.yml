@@ -72,3 +72,15 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --all-features
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install extraction test dependencies
+        run: python -m pip install pytest==9.1.1 pyyaml==6.0.3 tiktoken==0.14.0
+
+      - name: Run extraction and admission tests
+        working-directory: eval/component0
+        run: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests/test_extract_claims.py tests/test_import_trajectory.py tests/test_arms.py tests/test_natural_trajectory.py -q --tb=line -p pytest
