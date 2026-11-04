@@ -32,6 +32,7 @@ from typing import Any, Callable
 import yaml
 
 from harness import images
+from harness.arms import GENERATED_ARMS
 from harness.common import COMPONENT_ROOT, Pins, clean_env, load_pins, run
 from harness.diffs import parse_git_diff
 from harness.dtar import extract
@@ -396,8 +397,14 @@ def build_prompt(pins: Pins, arm: str) -> bytes:
     if result.returncode != 0:
         raise TrialError("arms prompt failed: " + result.stderr.decode(errors="replace"))
     manifest = json.loads((pins.episode_dir / "packets" / "manifest.json").read_text())
-    expected = manifest["prompts"][arm]["sha256"]
-    if sha256_bytes(result.stdout) != expected:
+    expected = (manifest.get("prompts") or {}).get(arm)
+    # Generated packets are gitignored, so they stay out of the frozen manifest.
+    # A frozen arm must still match its manifest hash byte for byte.
+    if expected is None:
+        if arm not in GENERATED_ARMS:
+            raise TrialError(f"prompt for {arm} is not in packets/manifest.json")
+        return result.stdout
+    if sha256_bytes(result.stdout) != expected["sha256"]:
         raise TrialError(f"prompt for {arm} does not match packets/manifest.json")
     return result.stdout
 

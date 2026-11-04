@@ -1,146 +1,151 @@
 # Component 2 validation
 
-Measured on 2 November 2026. The numbers in this note are the result. The generated briefing and the agent traces stay on the machine that ran them.
+Measured again on 3 November 2026, on the working tree whose parent commit is `c397bef`. Packet scores below were computed that day against the packets in the tree. The 2 November agent matrix used a different Component 2 prompt and is not reused as the result for this packet.
 
-This note answers the question Component 1 left open:
+This note answers:
 
-> Can contextd automatically preserve what an agent learned, rather than merely what commands it executed, and does that measurably reduce rediscovery for the next agent?
+> Can contextd automatically preserve what a real agent learns during execution and use that knowledge to help a completely fresh agent continue with less rediscovery, without fabricating or losing important state?
 
-**On this episode, yes for what was said, and yes for rediscovery against Component 1 and against no briefing. It does not reach the oracle's token cost, and it does not yet see a live shell.**
-
-The predecessor is the scripted Session A, not a live model. Every required gold atom is a sentence in that session's notes. The extractor quotes those sentences. It does not read `gold/atoms.yaml` or `oracle.txt`. A fresh agent given the resulting page solved 5/5, broke no constraint, and used fewer turns and fewer tokens than the Component 1 page and than no page. Mean tokens were 113,018 against 188,948 for Component 1, 209,490 for no briefing, and 68,296 for the oracle.
+**On the two measured trajectories, yes for preservation. Quotes are typed, evidenced, and reconstructed after a restart, and `context_now` renders them. On limiter-handoff the page recalls every required atom. The unmatched unit is the projector's exit line, which Component 1 also shows, and the successor matrix does not add a constraint violation or a forbidden action. A fresh agent given that page reached the frontier in fewer turns and fewer tokens than the Component 1 page, in the 3 November run `component2-2026-11-03`. It does not reach the oracle's token cost.**
 
 ---
 
-## 1. What was tested first, with no agent
+## 1. Packet score, limiter-handoff, no agent
 
-`python -m harness.extract_claims` reads `history/history.jsonl` and the 31-event replay log. `project_claims` admits candidates and renders them with `memory::project::fold` and `broker::snapshot::render`. The same focal task id as Component 1 comes back: `t_a58f76e3ca4078e8a849ed9682f450cc`. The pytest reality is still `exited 1`, confidence `observed`, origin `projector`. Nine candidates were admitted. Zero were rejected.
+Command, from `eval/component0`, after `write_packet` regenerated the gitignored Component 2 files:
 
-| Claim | Kind | Confidence | Evidence |
-|---|---|---|---|
-| Keep the public signatures and `handle_request` | constraint | stated | `history:A:8` |
-| No new dependencies | constraint | stated | `history:A:8` |
-| Mock backend ruled out | ruled_out | inferred | `history:A:12` |
-| Lock and synchronization ruled out | ruled_out | inferred | `history:A:16` |
-| Create branch counts only non-idle connections | reality | inferred | `history:A:18`, `history:A:17` |
-| Redis counter rejected | ruled_out | inferred | `history:A:20` |
-| Idle connections count toward the cap | decision | inferred | `history:A:21` |
-| Keepalive cleanup left out of scope | unknown | hypothesis | `history:A:23` |
-| Fix the create branch, then `scripts/unasync.py` | next_action | inferred | `history:A:24` |
+```bash
+.venv/bin/python -c "
+from harness.extract_claims import write_packet
+from harness.common import EPISODES_DIR
+from harness.packet_score import load_atoms, score_packet, split_units, PACKET_KINDS
+from harness.arms import packet_text
+import tiktoken
+episode = EPISODES_DIR / 'limiter-handoff'
+write_packet(episode)
+"
+```
 
-Skipped, and checked in `packets/contextd_component2_claims.json`:
+Tokenizer `o200k_base`. Gold `episodes/limiter-handoff/gold/atoms.yaml`, seven recall atoms. The extractor does not read that file.
 
-- Units 1 and 3, narration, no speech act.
-- Units 9, 13, and 19, open hypotheses (mock suspect, lock suspect, Redis idea). They are not current.
-- Units 25, 28, 30, 32, 35, and 42, Session B. That session has no command that is still failing.
+| Arm | Tokens | Required recall | Unit precision | Token precision | Stale as current | Stale marked | Unmatched unit |
+|---|---|---|---|---|---|---|---|
+| none | 0 | 0 | — | — | 0 | 0 | — |
+| summary | 170 | 0.14 | 0.75 | 0.81 | 0 | 0 | the unmatched summary lines |
+| contextd-new (Component 1) | 318 | 0 | 0 | 0 | 0 | 0 | both units |
+| contextd-component2 | 1,032 | 1.00 | 0.90 | 0.94 | 0 | 1 | `[reality] … exited 1` |
+| oracle | 381 | 1.00 | 1.00 | 1.00 | 0 | 1 | none |
 
-A commands-only copy of the history extracts nothing. A note that names a database after a `sed` whose output does not contain those words is not a claim. A repeated decision is kept once. No extracted claim is `observed`.
+Nine claims admitted, zero rejected. Focal task `t_a58f76e3ca4078e8a849ed9682f450cc`. Daemon `estimated_tokens` is 1,015, under the 1,500 budget, so nothing was trimmed. The unmatched tenth is the projector's observed pytest line. It is not a sentence the extractor invented. The Redis rejection is the one stale atom, and it is marked. The keepalive note is present as a hypothesis. Host-header notes from Session B are absent.
 
-Packet score against the real gold, tiktoken `o200k_base`, before any agent:
+The Rust quoter and the Python proposer emit the same kind, text, and confidence on this episode (`test_rust_extractor_matches_python_on_the_episode`). Commands alone still extract nothing.
 
-| Arm | Tokens | Required recall | Unit precision | Stale as current | Stale marked |
-|---|---|---|---|---|---|
-| none | 0 | 0 | — | 0 | 0 |
-| summary | 170 | 0.14 | 0.75 | 0 | 0 |
-| contextd-new (Component 1) | 318 | 0 | 0 | 0 | 0 |
-| contextd-component2 | 1,030 | 1.00 | 0.90 | 0 | 1 |
-| oracle | 381 | 1.00 | 1.00 | 0 | 1 |
+These token counts match the 3 November status audit's fresh render (1,032 / 1,015), not the 2 November note's 1,030 / 1,042.
 
-The missing tenth of precision is the projector's pytest line, `exited 1`. It matches no gold atom. It is the observed failure, not an invented fact. Token precision on the same packet is 0.94. The Redis line is the one stale atom, and it is marked rejected. The keepalive note is present as a hypothesis. The host-header notes from Session B are absent. Daemon estimate of the packet is 1,042 tokens, under the 1,500 budget, so nothing was trimmed.
+## 2. Natural trajectory, no preformatted speech acts
 
-The admission binary finishes in well under a tenth of a second. It makes no model call. Extraction overhead on the predecessor's run is zero.
+Episode `eval/component0/episodes/retry-budget`. The input is `trajectory.jsonl` in the adapter's shape (tool result, agent message, user message, retract). No line starts with `Decision`, `Ruled out`, `Rejected`, or `Next step`. `agent_observe.adapt_trace` writes shell events with output and notes with `role: conclusion`. `project_claims --extract` admits them. The gold file is read only by `score_packet` after the packet exists. A leak marker lives only in `gold/leak_marker.txt`; the trajectory, the adapter, and the extractor do not contain it.
 
-`cargo test -p contextd-core -p memory -p broker` passed (the projector and the claim rules). `pytest` on the extraction, arm, packet, and matrix tests passed, 81 tests. `harness.arms check` passed. The frozen `packets/contextd.txt` hash is unchanged.
+| | |
+|---|---|
+| Admitted | 8 claims plus one retract. 0 rejected. 3 skipped |
+| Skipped | Session B (every command exited 0), Session C (no command), and "The database pool is exhausted…" (no overlap with the cited output) |
+| Retract | "The first send is not counted…" was admitted, then superseded. It is not current |
+| Tokens | 503 tiktoken, daemon estimate 499 |
+| Required recall | 1.00 (6 recall atoms) |
+| Unit precision | 0.875 (8 units) |
+| Stale as current | 0 |
+| Unresolved present | true (the "might be involved" hypothesis) |
+| Unmatched unit | `[reality] python -m pytest -q tests/test_retry.py exited 1` |
 
----
+Current page, and nothing else from the trajectory:
 
-## 2. Agent protocol
+- reality, inferred: retry_count 2 where the test expects 1. Evidence is the note and the pytest output.
+- reality, inferred: deliver increments retry_count before open_socket. Evidence is the note and the `sed` output.
+- ruled_out, inferred: the timeout path is not the cause.
+- unknown, hypothesis: a shared counter might be involved.
+- constraint, stated: keep the signature. Constraint, stated: do not add a dependency.
+- next_action, inferred: I'll move the increment…
+- reality, observed, projector: the pytest exited 1.
 
-From `eval/component0`, after image preflight (all six pins matched the Component 1 run: agent `d51cf876163c`, scorer `1fee64413fff`, egress `de6801f2858f`, replay `6dd6ed88d4d6`, ollama `2a6e883b917f`, model `0a109f422b47`):
+The contradictory conclusion stayed current in a run that stopped before the retract, and was superseded once the retract note was in the log. An update whose new sentence does not overlap the cited output does not supersede the claim it names (`an_ungrounded_update_does_not_supersede`).
+
+`project_claims --extract` on this trajectory took 0.095s with a warm binary, including process start. No model call.
+
+## 3. Restart and context_now
+
+`extract::tests::a_restart_rebuilds_the_same_snapshot` writes a failing shell event with output, a conclusion note, and a user constraint note into a file-backed database, runs `run_handoff`, drops the store, opens it again, and rebuilds from the log. The rendered snapshot is the same after a second handoff, which inserts nothing. The conclusion is inferred, with evidence ids. The constraints are stated and user-origin. The exit line is the only observed claim. `get_fold_events` still returns no notes, so the projector's selection contract is unchanged. `cargo test --workspace --all-features` exited 0 on this tree. `pytest tests` in `eval/component0` passed 256 tests.
+
+The daemon calls the same `run_handoff` at startup, after `contextd note`, and at the start of `context_now`. The test drives the store those calls use.
+
+## 4. Agent matrix
+
+The 2 November run `component2-2026-11-02` is on disk. Its Component 2 prompt hash is `2bacd5d2b8b53764…`. Today's prompt is `81030c81a3caba32895b737cb90cdfa29ffe5f09f3d85bea4fac3d326aba964f`. `none`, `summary`, `oracle`, and `contextd-new` still match that older run. The Component 2 arm does not, so the 2 November agent totals are not a measurement of this packet.
+
+The run that matches this packet:
 
 ```bash
 set -a && source /home/vansh5632/contextd/.env && set +a
+cd eval/component0
 .venv/bin/python -m harness.run_matrix \
-  --run-id component2-2026-11-02 \
+  --run-id component2-2026-11-03 \
   --reps 5 \
   --arms none,summary,oracle,contextd-new,contextd-component2 \
   --i-accept-spend
-.venv/bin/python -m harness.report runs/component2-2026-11-02
+.venv/bin/python -m harness.report runs/component2-2026-11-03
 ```
 
-Forced placement. The agent does not call MCP. Model `gpt-6.1-sol`, Codex `0.159.3`, seed `20260930`, five reps, per-trial cap 2,000,000, matrix cap 40,000,000, timeout 1800s. Workspace tar prefix `f832caec9bc28c16`. G3, G4, and G5 passed. The matrix ran from 2026-11-02T15:36:06Z to 15:56:35Z, 25/25 scored, 3,895,005 input-plus-output tokens.
+Preflight matched the 2 November image pins: agent `d51cf876163c`, scorer `1fee64413fff`, egress `de6801f2858f`, replay `6dd6ed88d4d6`, ollama `2a6e883b917f`, model `0a109f422b47`. Model `gpt-6.1-sol`, Codex `0.159.3`, seed `20260930`, five reps, per-trial cap 2,000,000, matrix cap 40,000,000, timeout 1800s. Workspace tar prefix `f832caec9bc28c16`. Forced placement. The agent does not call MCP. `arms check` passed. The matrix ran from 2026-11-03T17:19:19Z to 17:42:13Z, 25/25 scored, 3,986,524 input-plus-output tokens. Each Component 2 trial's `prompt.sha256` is the hash above.
 
-`contextd-new` is the Component 1 observation-only briefing already frozen in `packets/contextd_new.txt`. The report name is the arm name.
+Report: `runs/component2-2026-11-03/report.md`. Real gold. n=5.
 
----
+| Arm | Solved | ttf median | ttf mean | Repeated | Forbidden | Constraint | Packet recall | Packet precision | Mean tokens |
+|---|---|---|---|---|---|---|---|---|---|
+| none | 1.00 | 12 | 11.40 | 0 | 0 | 0 | 0 | — | 232,248 |
+| summary | 1.00 | 4 | 4.00 | 0 | 0 | 0 | 0.14 | 0.75 | 200,962 |
+| oracle | 1.00 | 3 | 3.00 | 0 | 0 | 0 | 1.00 | 1.00 | 70,512 |
+| contextd-new | 1.00 | 6 | 5.80 | 0 | 0 | 0 | 0 | 0 | 172,197 |
+| contextd-component2 | 1.00 | 3 | 3.20 | 0 | 0 | 0 | 1.00 | 0.90 | 121,386 |
 
-## 3. Agent results
+Component 2 and the oracle are `ok` on all five reps. Component 1 and the summary are `placement` on all five, which is the missing required atoms. No trial recorded a constraint violation, a forbidden action, or repeated work.
 
-Harness report: `runs/component2-2026-11-02/report.md`. Real gold. n=5. Rates are shares of trials.
-
-| Arm | Solved | ttf median | ttf mean | Repeated | Forbidden | Constraint | Packet recall | Packet precision | Mean tokens | Mean wall |
-|---|---|---|---|---|---|---|---|---|---|---|
-| none | 1.00 | 11 | 10.60 | 0.20 | 0.00 | 0.00 | 0.00 | — | 209,490 | 45.1s |
-| summary | 1.00 | 3 | 2.80 | 0.20 | 0.00 | 0.00 | 0.14 | 0.75 | 199,248 | 50.4s |
-| oracle | 1.00 | 2 | 2.60 | 0.00 | 0.00 | 0.00 | 1.00 | 1.00 | 68,296 | 20.1s |
-| contextd-new | 1.00 | 5 | 4.60 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 188,948 | 39.6s |
-| contextd-component2 | 1.00 | 3 | 3.20 | 0.00 | 0.00 | 0.00 | 1.00 | 0.90 | 113,018 | 29.5s |
-
-Failure tags: Component 2 and the oracle are `ok` on all five reps. Component 1 and the summary are `placement` on all five, which is the missing required atoms, not a wrong edit. `none-r2` is the one `behaviour` tag, from one repeated-work call. No trial recorded a constraint violation or a forbidden action. Hidden pool-cap tests passed on the Component 2 reps, including the keepalive-unchanged checks and the unasync regeneration check (`contextd-component2-r1/score.json`).
-
-Paired deltas versus `none` in the same rep, from the harness report. Bootstrap 95% CI, seed 20260930, 10,000 resamples.
+Paired deltas versus `none`, from the harness report. Bootstrap 95% CI, seed 20260930, 10,000 resamples.
 
 | Arm | Turns to frontier | Tokens |
 |---|---|---|
-| summary | −7.80 [−9.20, −6.20] | −10,242 [−36,615, +13,524] |
-| oracle | −8.00 [−9.20, −6.40] | −141,194 [−155,611, −126,609] |
-| contextd-new | −6.00 [−8.40, −4.00] | −20,542 [−49,294, +5,929] |
-| contextd-component2 | −7.40 [−8.60, −6.20] | −96,472 [−128,406, −64,538] |
+| summary | −7.40 [−9.00, −5.80] | −31,286 [−64,706, +236] |
+| oracle | −8.40 [−9.00, −7.60] | −161,735 [−174,093, −150,214] |
+| contextd-new | −5.60 [−6.60, −4.60] | −60,050 [−93,183, −26,972] |
+| contextd-component2 | −8.20 [−8.80, −7.60] | −110,862 [−133,952, −88,400] |
 
-Component 2 against Component 1, same pairing method, arm minus `contextd-new`:
+Component 2 against Component 1, same pairing, arm minus `contextd-new`. Turns per rep −3, −3, −2, −3, −2. Tokens per rep −18,514, −82,056, −61,831, −21,702, −69,953.
 
-| Metric | Per rep | Mean | 95% CI |
-|---|---|---|---|
-| Turns to frontier | −3, −1, −2, −2, +1 | −1.4 | [−2.4, −0.2] |
-| Tokens | −122,727, −114,657, −34,665, −50,132, −57,467 | −75,930 | [−106,594, −45,412] |
+| Metric | Mean | 95% CI |
+|---|---|---|
+| Turns to frontier | −2.6 | [−3.0, −2.2] |
+| Tokens | −50,811 | [−73,170, −28,453] |
 
-Every rep used fewer tokens than Component 1. Four of five reached the frontier sooner. Rep 5 took one more turn (3 against 2) and still used 57,467 fewer tokens.
+Every rep used fewer turns and fewer tokens than Component 1. Constraint-violation rate 0. Forbidden-action rate 0. Repeated-work rate 0.
 
 Component 2 against the oracle:
 
 | Metric | Mean | 95% CI |
 |---|---|---|
-| Turns to frontier | +0.6 | [−0.6, +1.8] |
-| Tokens | +44,722 | [+25,786, +62,721] |
+| Turns to frontier | +0.2 | [−0.4, +0.8] |
+| Tokens | +50,874 | [+38,389, +63,152] |
 
-The turn gap to the oracle is not distinguishable at n=5. The token gap is. Mean tokens before the frontier were about 8,300 for Component 2 and about 7,630 for the oracle, against about 12,300 for Component 1 and about 65,600 for no briefing. The saving versus Component 1 is mostly after arrival: the page names the decision and the edit, and the successor does less rereading. It does not get as small as the 381-token human note.
-
----
-
-## 4. Completion criteria
-
-| Criterion | Result |
-|---|---|
-| Extracts useful claims from observable activity | Pass. Nine claims from Session A's notes and one grounded file read. Commands alone extract nothing |
-| Preserves meaning, confidence, and evidence | Pass. Texts are verbatim spans. The finding is `inferred`, not `observed`. Each evidence id resolves to the note or the cited output |
-| Updates working state without fabricating | Pass. The gate rejected nothing. Open suspects are absent. The Redis idea is absent and the rejection is marked. The pytest failure stays focal and stays `observed` |
-| Improves on Component 1 without a constraint regression | Pass on this episode. Paired tokens −75,930 and turns −1.4, both intervals exclude zero. Constraint-violation rate 0. Forbidden-action rate 0. Repeated-work rate 0 |
-| Closes the gap to the oracle | Not on tokens. The interval versus the oracle excludes zero, about 45,000 tokens still above it |
-
----
+The turn gap to the oracle is not distinguishable at n=5. The token gap is. Extraction added no model tokens on the predecessor: the predecessor is the scripted transcript, and the handoff calls no model. The successor's token total includes reading the 1,032-token page.
 
 ## 5. What this does not show
 
-The predecessor's notes were written as the claims. A live agent that never says "Decision" or "Ruled out" would not yield this packet. The deterministic pass abstains on those trajectories, and the LLM pass from the design was not built.
+The natural classifier only fires on notes the adapter marked as conclusions, plus the speech-act prefixes. A daemon that only has the shell hook still has no stdout and no agent message, and a grounded reality still needs both.
 
-The shell hook still does not store notes or stdout. This run read `history.jsonl`, which the benchmark already kept. A daemon that only has the 31 shell events still has required-atom recall 0, because that is what the commands-only test extracts.
+One successor model, five reps, one coding task. The token interval versus Component 1 does not include zero. It is not a claim about other tasks. The retry-budget episode was not given to Codex. Its packet score is not a claim about a successor agent.
 
-One episode, five reps, one successor model. The token interval versus Component 1 is wide. It does not include zero. It is not a claim about other tasks.
-
-The placed page is 1,030 tokens because the quotes are whole notes. A shorter rendering of the same claims might move the total toward the oracle. That would be a render change, and it was not part of this prototype.
-
----
+Dedup does not merge paraphrases. Two current realities can describe the same failure in different words until an explicit retract names one of them.
 
 ## 6. Answer
 
-contextd can preserve what this predecessor said, as typed claims with a confidence and a pointer back to the note or the tool output, and a later agent spends less of the investigation rediscovering it. The preservation is a quote of the trajectory, checked by the claim rules Component 1 already had. It is not a summary, and it is not a reading of the gold file. The human note is still the smaller page, and a live shell still does not carry the sentences the quote is made from.
+contextd can take a coding agent's tool results and its own sentences, keep the sentences that are speech acts or that overlap the tool output, and store them as claims with a confidence and a pointer back to the note or the output. A restarted daemon folds those claim events into the same page, and `context_now` is that page. It does not mark an extracted sentence as something the tool printed. It drops a conclusion the output does not support, and it does not replace a current claim unless the later note names it or the note is the single next action.
+
+On limiter-handoff that page contains every required atom. In `component2-2026-11-03`, a fresh agent given it reached the frontier sooner and used fewer tokens than the same agent given the Component 1 page, with no constraint violation and no forbidden action. The human note is still the smaller page. The shell hook still does not carry the tool output the quote is made from; the adapter does.

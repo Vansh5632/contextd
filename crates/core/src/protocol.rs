@@ -67,6 +67,40 @@ pub enum ContextRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         replaces: Option<String>,
     },
+    /// One coding-agent observation: a tool result, a conclusion, a user
+    /// constraint, a retraction, or an update. This is not the shell hook.
+    Observe {
+        kind: ObserveKind,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        session: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        support_event_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replaces_text: Option<String>,
+    },
+    /// Quote stored notes and admit the claims that pass the gate.
+    Handoff,
+}
+
+/// What an `observe` request is recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObserveKind {
+    Tool,
+    Conclusion,
+    User,
+    Retract,
+    Update,
 }
 
 /// The kinds `contextd claim` will send. Intent stays on the `intent` verb.
@@ -98,6 +132,8 @@ impl ContextRequest {
             | ContextRequest::Intent { text }
             | ContextRequest::AgentClaim { text, .. } => text.as_str(),
             ContextRequest::UserClaim { text, .. } => text.as_deref()?,
+            ContextRequest::Observe { text, .. } => text.as_deref()?,
+            ContextRequest::Handoff => return None,
         };
         let trimmed = text.trim();
         (!trimmed.is_empty()).then_some(trimmed)

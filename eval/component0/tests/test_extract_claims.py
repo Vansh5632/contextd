@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -29,14 +30,10 @@ REPLAY = (
     / "events.jsonl"
 )
 EXTRACTOR = Path(__file__).resolve().parents[1] / "harness" / "extract_claims.py"
-GATE = (
-    Path(__file__).resolve().parents[3]
-    / "crates"
-    / "broker"
-    / "src"
-    / "bin"
-    / "project_claims.rs"
-)
+REPO = Path(__file__).resolve().parents[3]
+GATE = REPO / "crates" / "broker" / "src" / "extract.rs"
+ADMIT = REPO / "crates" / "broker" / "src" / "bin" / "project_claims.rs"
+ADAPTER = REPO / "eval" / "component0" / "harness" / "agent_observe.py"
 
 
 def episode_events() -> list[dict]:
@@ -75,7 +72,7 @@ def _cmd(
 
 
 def test_extractor_and_gate_do_not_name_the_gold_files() -> None:
-    for path in (EXTRACTOR, GATE):
+    for path in (EXTRACTOR, GATE, ADMIT, ADAPTER):
         text = path.read_text()
         assert "atoms.yaml" not in text
         assert "oracle.txt" not in text
@@ -254,6 +251,45 @@ def test_component1_projector_admits_the_episode_and_hides_nothing_required() ->
     assert scored["unresolved_present"] is True
     on_disk = json.loads((EPISODE / "packets" / "contextd_component2.txt").read_text())
     assert on_disk == snapshot
+
+
+def test_rust_extractor_matches_python_on_the_episode(tmp_path: Path) -> None:
+    events = episode_events()
+    python = {(claim.kind, claim.text, claim.confidence) for claim in extract(events).claims}
+    log_path = tmp_path / "events.jsonl"
+    packet_path = tmp_path / "packet.json"
+    report_path = tmp_path / "report.json"
+    log_path.write_text("".join(json.dumps(event) + "\n" for event in events))
+    result = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "-q",
+            "-p",
+            "broker",
+            "--bin",
+            "project_claims",
+            "--",
+            "--extract",
+            str(log_path),
+            str(packet_path),
+            str(report_path),
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+        shell=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    report = json.loads(report_path.read_text())
+    rust = {
+        (item["kind"], item["text"], item["confidence"])
+        for item in report["accepted"]
+        if item["kind"] != "retract"
+    }
+    assert rust == python
+    assert report["snapshot"]["focal_task"]["id"] == "t_a58f76e3ca4078e8a849ed9682f450cc"
 
 
 def test_focal_command_is_the_unsuperseded_pytest() -> None:

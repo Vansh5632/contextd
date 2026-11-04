@@ -492,10 +492,31 @@ pub fn insert_claim_event(conn: &Connection, event: &ProcessedEvent) -> Result<(
 }
 
 /// Shell and claim events in fold order. File, git, and proc noise is skipped.
+///
+/// Notes are not included. They are evidence for handoff extraction
+/// ([`get_handoff_events`]), not inputs to the Component 1 projector.
 pub fn get_fold_events(conn: &Connection) -> Result<Vec<RawEvent>> {
     let mut stmt = conn.prepare(&format!(
         "{EVENT_SELECT}
          WHERE source IN ('shell', 'claim')
+         ORDER BY timestamp_ms ASC, id ASC"
+    ))?;
+    let rows = stmt.query_map([], processed_from_row)?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row?.raw);
+    }
+    Ok(events)
+}
+
+/// Shell, note, and claim events in log order.
+///
+/// The projector still folds only shell and claim rows. Notes are loaded here
+/// so a handoff can quote them without changing that selection contract.
+pub fn get_handoff_events(conn: &Connection) -> Result<Vec<RawEvent>> {
+    let mut stmt = conn.prepare(&format!(
+        "{EVENT_SELECT}
+         WHERE source IN ('shell', 'note', 'claim')
          ORDER BY timestamp_ms ASC, id ASC"
     ))?;
     let rows = stmt.query_map([], processed_from_row)?;
