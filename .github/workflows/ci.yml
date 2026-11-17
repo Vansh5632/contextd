@@ -84,3 +84,7 @@ jobs:
       - name: Run extraction and admission tests
         working-directory: eval/component0
         run: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests/test_extract_claims.py tests/test_import_trajectory.py tests/test_arms.py tests/test_natural_trajectory.py -q --tb=line -p pytest
+
+      - name: Run Component 2.1 grader tests
+        working-directory: eval/component21
+        run: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests -q --tb=line -p pytest

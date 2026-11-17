@@ -1,5 +1,7 @@
 # Working-state representation for contextd
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Research note. No code changes.
 
 Question this note answers:

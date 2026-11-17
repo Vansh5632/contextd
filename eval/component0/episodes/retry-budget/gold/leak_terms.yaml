@@ -1,0 +1,14 @@
+# Must not appear in the built workspace. The handoff sentences live in the
+# episode packets, not in the tree the successor is given.
+tree_terms:
+  - 'kq7-retry-budget-marker-4e1c'
+  - '\bruled out\b'
+  - '\bsignature unchanged\b'
+  - '\bdo not add a dependency\b'
+  - '\bmight be involved\b'
+  - '\bnot the cause\b'
+  - '\bnot counted\b'
+
+our_change_terms:
+  - pattern: 'kq7-retry-budget-marker-4e1c'
+  - pattern: '\bnot counted\b'

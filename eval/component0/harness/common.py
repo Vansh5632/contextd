@@ -35,6 +35,9 @@ class Pins:
     fix_patch: Path
     hidden_tests: Path
     leak_terms: Path
+    source: str
+    local_tree: Path | None
+    checks: tuple[str, ...]
 
     @property
     def workspace_dir(self) -> Path:
@@ -58,12 +61,23 @@ def load_pins(episode: str = DEFAULT_EPISODE) -> Pins:
     with open(episode_dir / "pins.toml", "rb") as handle:
         data = tomllib.load(handle)
     repo, git, paths, ep = data["repo"], data["git"], data["paths"], data["episode"]
+    source = str(repo.get("source", "mirror"))
+    if source == "local":
+        repo_url = str(repo.get("url", "local"))
+        repo_sha = str(repo.get("sha", "local"))
+        repo_tag = str(repo.get("tag", "local"))
+        local_tree = episode_dir / str(repo["tree"])
+    else:
+        repo_url = repo["url"]
+        repo_sha = repo["sha"]
+        repo_tag = repo["tag"]
+        local_tree = None
     return Pins(
         episode_dir=episode_dir,
         name=ep["name"],
-        repo_url=repo["url"],
-        repo_sha=repo["sha"],
-        repo_tag=repo["tag"],
+        repo_url=repo_url,
+        repo_sha=repo_sha,
+        repo_tag=repo_tag,
         author_name=git["author_name"],
         author_email=git["author_email"],
         default_branch=git["default_branch"],
@@ -80,6 +94,9 @@ def load_pins(episode: str = DEFAULT_EPISODE) -> Pins:
         fix_patch=episode_dir / ep["fix_patch"],
         hidden_tests=episode_dir / ep["hidden_tests"],
         leak_terms=episode_dir / ep["leak_terms"],
+        source=source,
+        local_tree=local_tree,
+        checks=tuple(str(item) for item in ep.get("checks", ["unasync"])),
     )
 
 

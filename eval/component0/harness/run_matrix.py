@@ -72,7 +72,8 @@ def select_arms(available: list[str], requested: str | None) -> list[str]:
     return [arm for arm in available if arm in chosen]
 
 
-def build_schedule(arms: list[str], reps: int, seed: int, agent: str) -> dict[str, Any]:
+def build_schedule(arms: list[str], reps: int, seed: int, agent: str,
+                   episode: str = "limiter-handoff") -> dict[str, Any]:  # fmt: skip
     rng = random.Random(seed)
     trials = []
     for rep in range(1, reps + 1):
@@ -81,7 +82,7 @@ def build_schedule(arms: list[str], reps: int, seed: int, agent: str) -> dict[st
         for arm in order:
             trials.append({"index": len(trials), "rep": rep, "arm": arm, "dir": f"{arm}-r{rep}"})
     return {"schema": 1, "seed": seed, "reps": reps, "arms": list(arms), "agent": agent,
-            "trials": trials}  # fmt: skip
+            "episode": episode, "trials": trials}  # fmt: skip
 
 
 def load_or_create_schedule(run_dir: Path, schedule: dict[str, Any]) -> dict[str, Any]:
@@ -154,7 +155,7 @@ def gate_statuses(output: str) -> dict[str, str]:
     return statuses
 
 
-def preflight(run_dir: Path, config: dict[str, Any]) -> list[tuple[str, str, bool]]:
+def preflight(run_dir: Path, config: dict[str, Any], pins) -> list[tuple[str, str, bool]]:
     checks: list[tuple[str, str, bool]] = []
 
     def attempt(name: str, fn: Any) -> None:
@@ -164,10 +165,8 @@ def preflight(run_dir: Path, config: dict[str, Any]) -> list[tuple[str, str, boo
         except (Exception, SystemExit) as exc:  # noqa: BLE001 - a crashing check fails
             checks.append((name, str(exc), False))
 
-    pins = load_pins()
-
     def arms() -> str:
-        arms_check()
+        arms_check(pins.name)
         return "PASS"
 
     attempt("arms check", arms)
@@ -231,6 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-s", type=float, default=DEFAULT_TIMEOUT_S)
     parser.add_argument("--retry-failed", action="store_true",
                         help="rerun trials recorded as failed, replacing their dirs")  # fmt: skip
+    parser.add_argument("--episode", default="limiter-handoff")
     args = parser.parse_args(argv)
 
     reason = refusal(args.agent, args.stub, args.accept_spend)
@@ -241,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--run-id may only contain letters, digits, '.', '_' and '-'")
 
     config = load_agent_config()
-    pins = load_pins()
+    pins = load_pins(args.episode)
     with open(pins.episode_dir / "pins.toml", "rb") as handle:
         available = list(tomllib.load(handle)["arms"]["names"])
     try:
@@ -250,10 +250,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
     run_dir = RUNS_DIR / args.run_id
     schedule = load_or_create_schedule(
-        run_dir, build_schedule(arms, args.reps, args.seed, args.agent)
+        run_dir, build_schedule(arms, args.reps, args.seed, args.agent, args.episode)
     )
 
-    checks = preflight(run_dir, config)
+    checks = preflight(run_dir, config, pins)
     print("== preflight")
     for name, detail, ok in checks:
         print(f"{'PASS' if ok else 'FAIL'}  {name:<16} {detail}")
@@ -301,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n-- trial {trial['index']}: {trial['dir']} (token cap {cap})", flush=True)
         opts = TrialOptions(arm=trial["arm"], rep=trial["rep"], out=run_dir / trial["dir"],
                             agent=args.agent, timeout_s=args.timeout_s, token_cap=cap,
-                            force=args.retry_failed)  # fmt: skip
+                            force=args.retry_failed, episode=args.episode)  # fmt: skip
         try:
             meta = run_trial(opts)
             entry = {"status": meta["status"], "errors": meta["errors"],

@@ -1,0 +1,28 @@
+{
+  "estimated_tokens": 190,
+  "focal_task": {
+    "id": "t_51f189ddade2fda7ad0da842da251d35",
+    "next_action": {
+      "confidence": "inferred",
+      "evidence_ids": [
+        "obs_1"
+      ],
+      "id": "c_98ef31a867d3e6854ce59869b786bcb5",
+      "origin": "projector",
+      "text": "Re-run and inspect: python -m pytest -q tests/test_retry.py"
+    },
+    "reality": [
+      {
+        "confidence": "observed",
+        "evidence_ids": [
+          "obs_1"
+        ],
+        "id": "c_b4fc5375ea96eb2dad48ba8d505a2cd4",
+        "origin": "projector",
+        "text": "python -m pytest -q tests/test_retry.py exited 1"
+      }
+    ],
+    "status": "active"
+  },
+  "notice": "Claims are evidence. Verify the repo. observed > stated > inferred > hypothesis."
+}

@@ -1,5 +1,7 @@
 # Briefing selection failure
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Diagnosis of one replay. Session A’s failing pytest was stored and labelled correctly, then left out of the briefing. The agent therefore resumed from Session B’s commit and treated finished work as the current task.
 
 This note records what failed, which component caused it, and what the briefing did as a result. No code has been changed.

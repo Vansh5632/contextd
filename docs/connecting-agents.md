@@ -1,124 +1,48 @@
-# Connecting your AI tools to contextd
+# Connecting agents
 
-contextd is two processes:
+The long-running daemon records activity and owns storage. A client launches `contextd mcp`, a separate **stdio** process that forwards requests to the already-running daemon over a Unix socket. `contextd --mcp` remains an alias. There is no HTTP MCP endpoint.
 
-- **the daemon** — long-running, watches this machine, owns the database
-- **`contextd mcp`** — short-lived, spawned by your editor, forwards questions to the daemon
-
-Your editor only ever launches the second one. If the daemon is not running, tools still respond,
-but they say so instead of returning a blank briefing.
+Start the daemon in your project, or use the installed user service:
 
 ```bash
-contextd run                              # terminal 1: the watcher, in the foreground
-systemctl --user enable --now contextd    # or leave it to systemd
+contextd run
 ```
-
-`contextd --mcp` still works as a spelling of `contextd mcp`, so existing editor
-configuration does not need changing.
-
----
-
-## What agents can call
-
-| Tool | Use it when |
-|---|---|
-| `context_now` | Before asking the user what they are working on. Returns standing constraints, the focal task when one exists, a short line for each check that used to fail and now passes, authored notes on other unfinished work, and one line per other failing command. Not a recency feed. |
-| `search_context` | Looking for a specific past moment. Combines meaning-based and literal matching. |
-| `recall_similar` | The current problem feels familiar and you want to know how it went last time. |
-| `set_intent` | The user states a goal ("I am fixing the login bug") so later briefings stay on track. |
-| `note_claim` | Record an inferred finding, decision, ruled-out approach, unknown, or next action on the focal task. Confidence is `inferred` or `hypothesis`. Cannot write constraints, intent, or observed facts. |
-
-There is also one resource, `context://snapshot/current`, which is the same briefing as
-`context_now` with no arguments. Clients that support resources can attach it without spending a
-tool-call turn. Its `ttlMs` is `0` — a briefing is stale the moment it is read.
-
-`context_now` no longer returns `recent_activity`, `relevant_history`, or `related`. Evidence stays
-in the event log and is reachable through `search_context`.
-
-### User-stated claims
-
-Constraints, decisions, and ruled-out approaches that the *user* states are written from the CLI,
-not from MCP:
 
 ```bash
-contextd intent "fix the limiter undercount"
-contextd note "the idle count looks wrong in staging"
-contextd claim constraint "do not change the public signature"
-contextd claim decision "keep this in-process"
-contextd claim ruled-out "database contention"
-contextd claim retract c_01HZX...
-contextd claim done
+systemctl --user enable --now contextd
+contextd status
 ```
 
-`contextd note <TEXT>` stores a raw sentence on the event log (`source: note`). It is not a claim. A later handoff may quote it.
+Use one of those startup methods, with the same configuration as the MCP process. See [setup](build-walkthrough.md) for `watch_root`, XDG paths, and service behavior.
 
-The daemon socket is local and same-uid. An agent that can run a shell can also run `contextd claim`.
-That is a convention, not a security boundary.
+## Client configuration
 
-`note_claim` is the agent path. It records `origin=agent` and will not accept `stated` or `observed`
-confidence, nor `kind=constraint` / `kind=intent`.
+Find the installed executable with `command -v contextd`. The default installer path is `~/.local/bin/contextd`; replace `/home/you` below with your actual home directory. An absolute path avoids differences between an editor's PATH and your shell's PATH.
 
----
-
-## Cursor
-
-`~/.cursor/mcp.json` for every project, or `.cursor/mcp.json` inside one repo:
+For clients using an `mcpServers` JSON object:
 
 ```json
 {
   "mcpServers": {
     "contextd": {
-      "type": "stdio",
-      "command": "/usr/local/bin/contextd",
+      "command": "/home/you/.local/bin/contextd",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-Check **Output → MCP Logs** if the server does not appear.
+**Cursor:** put this in `.cursor/mcp.json` for the project or `~/.cursor/mcp.json` for your user. Reload/enable the server in the client. See [Cursor's MCP documentation](https://prod.cursor.com/docs/mcp).
 
-## Claude Code
+**Claude Code:** register the local stdio command for your user:
 
 ```bash
-claude mcp add --transport stdio --scope user contextd -- /usr/local/bin/contextd mcp
+claude mcp add --transport stdio --scope user contextd -- /home/you/.local/bin/contextd mcp
 ```
 
-Or commit `.mcp.json` at the repo root to share it with the team:
+For a shared project configuration, use the JSON block in `.mcp.json`. See [Claude Code's MCP documentation](https://code.claude.com/docs/en/mcp) for scopes and client approval behavior.
 
-```json
-{
-  "mcpServers": {
-    "contextd": {
-      "type": "stdio",
-      "command": "/usr/local/bin/contextd",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-## Claude Desktop
-
-`~/.config/Claude/claude_desktop_config.json` on Linux
-(`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
-
-```json
-{
-  "mcpServers": {
-    "contextd": {
-      "command": "/usr/local/bin/contextd",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Fully quit and reopen the app; reloading the window is not enough.
-
-## Continue.dev
-
-`.continue/mcpServers/contextd.yaml`:
+**Continue:** create `.continue/mcpServers/contextd.yaml`:
 
 ```yaml
 name: contextd
@@ -127,52 +51,125 @@ schema: v1
 mcpServers:
   - name: contextd
     type: stdio
-    command: /usr/local/bin/contextd
+    command: /home/you/.local/bin/contextd
     args:
       - mcp
 ```
 
-MCP only works in Continue's **agent** mode.
+Use Agent mode. See [Continue's MCP setup](https://docs.continue.dev/customize/deep-dives/mcp). Other stdio clients, including Claude Desktop, need the same command and args in their supported configuration surface. These examples describe configuration; this documentation refresh did not exercise the clients themselves.
 
----
+## Tools and resource
 
-## Checking it works without an editor
+| MCP tool | Behavior |
+|---|---|
+| `context_now` | Current standing constraints, focal task, formerly failing checks that now pass, other unfinished authored work, and other failing-task lines |
+| `search_context` | Semantic plus literal search over live recorded events |
+| `recall_similar` | Semantic history neighbors, with literal matching when query embeddings are unavailable |
+| `set_intent` | Record a goal stated by the user |
+| `note_claim` | Record an agent-inferred finding, decision, ruled-out approach, unknown, or next action on the focal task |
 
-Drive the protocol by hand. Anything on stdout is JSON-RPC; logs go to stderr.
+Search/recall take `text` and an optional `limit` (default 10, clamped to 1–50). Their `semantic` flag reports query-embedding availability. They do not search the compressed archive or graph.
+
+`context_now` reads the SQLite materialized task/claim projection after a handoff pass. The optional `text` argument is accepted for compatibility but currently does not change the selection. Old event-feed fields `recent_activity`, `relevant_history`, and `related` are absent. See [architecture](architecture.md) for the response contract.
+
+`context://snapshot/current` exposes the same current briefing with no arguments. The resource contents have `ttlMs: 0`; the resource-list metadata has a separate one-hour TTL. Support for displaying/attaching a resource depends on the client.
+
+`note_claim` accepts `kind` values `reality`, `decision`, `ruled_out`, `unknown`, or `next_action`; `confidence` is `inferred` (default) or `hypothesis`. Unknowns become hypotheses. `replaces` can identify an earlier eligible agent claim. It cannot author constraints, intent, or observed facts. This direct authored-claim path validates origin/kind/confidence; it does **not** run Component 2.1 evidence grounding or attach tool evidence automatically. A recorded inference still needs checking.
+
+## User statements and raw notes
+
+```bash
+contextd intent "fix the limiter undercount"
+contextd claim constraint "do not change the public signature"
+contextd claim decision "keep this in-process"
+contextd claim ruled-out "database contention"
+contextd note "Decision: preserve the existing command identity"
+```
+
+`claim` writes stated user claims. It needs a focal task; `intent` can establish one. `note` stores a raw sentence and triggers extraction; it does not directly file a claim, and unrecognized text may be skipped.
+
+Use an actual returned claim ID to retract a user-editable claim:
+
+```bash
+contextd claim retract c_REPLACE_WITH_ACTUAL_ID
+contextd claim done
+```
+
+`done` closes the current focal task. Current constraints remain visible until superseded. Authorship is a protocol convention, not a security boundary: a same-user process with shell access can invoke the user CLI path.
+
+## Record tool output for handoffs
+
+Shell hooks do not record stdout. To preserve what an agent saw, send observations explicitly. A tool observation records a result; it does not execute the command:
+
+```bash
+contextd observe '{"kind":"tool","session":"agent-a","command":"inspect retry counter","cwd":"/path/to/project","exit_code":0,"output":"retry_count += 1
+open_socket()"}'
+```
+
+Copy the returned `event_id` into a conclusion's `support_event_id`:
+
+```bash
+contextd observe '{"kind":"conclusion","session":"agent-a","text":"retry_count increments before open_socket","support_event_id":"REPLACE_WITH_TOOL_EVENT_ID"}'
+contextd handoff
+```
+
+Handoff returns admission details under `accepted`, `rejected`, and `skipped`. This example demonstrates the wire shape; use real command output and identifiers for real work. Output is truncated to at most 200 lines / 8,000 characters. `observe` also accepts `kind: user`, `retract`, and `update`; updates require `replaces_text`. The exact schema is in [protocol.rs](../crates/core/src/protocol.rs).
+
+Extraction also runs at startup, after raw notes, and before `context_now`. It uses local rules and preserves inferred/hypothesis confidence. Component 2.1 can reject unsupported clauses and valid paraphrases; see [current status](status.md).
+
+## Check MCP discovery
+
+This probe needs the built/installed binary, but tool listing does not require a running daemon. Protocol responses go to stdout and logs to stderr:
 
 ```bash
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"1.0"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  | contextd mcp 2>/dev/null
+  | contextd mcp
 ```
 
-You should see `context_now`, `search_context`, `recall_similar`, `set_intent`, and `note_claim`.
+The tool list should contain all five names above. Client requests negotiate the protocol through `rmcp`; the version shown is a probe example.
 
-To skip MCP entirely and talk to the daemon directly, the socket speaks the same verbs:
+## Direct socket access
 
-```bash
+The socket speaks one JSON object per line. Examples of request bodies:
+
+```json
 {"query":"now"}
 {"query":"search","text":"connection refused","limit":10}
 {"query":"recall","text":"flaky test"}
 {"query":"intent","text":"fixing the login bug"}
-{"query":"user_claim","kind":"constraint","text":"do not change the public signature"}
-{"query":"agent_claim","kind":"reality","text":"the check is in _assign_requests_to_connections","confidence":"inferred"}
+{"query":"handoff"}
 ```
 
-Note that `nc -U` will hang, because it holds the connection open waiting for more input. Use a
-client that half-closes after writing, the way `contextd mcp` does.
+For an actual request without netcat variant differences, this Python client discovers the configured socket through `status`, sends one line, half-closes its write side, and reads a reply:
 
----
+```bash
+python3 - <<'PYCLIENT'
+import json
+import socket
+import subprocess
+
+status = subprocess.check_output(["contextd", "status"], text=True)
+socket_path = next(line.split(None, 1)[1] for line in status.splitlines()
+                   if line.startswith("socket "))
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+    client.settimeout(30)
+    client.connect(socket_path)
+    client.sendall((json.dumps({"query": "now"}) + "\n").encode())
+    client.shutdown(socket.SHUT_WR)
+    with client.makefile("r") as response:
+        print(response.readline().rstrip())
+PYCLIENT
+```
+
+A plain `nc -U` can wait indefinitely for connection closure. If using OpenBSD netcat, send a newline and use `-N` to half-close after stdin ends. Other implementations use different flags.
 
 ## Troubleshooting
 
-**"Is the contextd daemon running?"** — the MCP server is fine; the daemon is not. Start `contextd`.
-
-**Tools appear but every briefing is empty** — the daemon is running but has no current task.
-Shell failures and `contextd intent` open tasks. It only watches the directory it was started in.
-
-**Related history is always empty** — that half needs embeddings, which need Ollama. Everything else
-keeps working without it; `search_context` falls back to literal matching and reports
-`"semantic": false` so you can tell the difference.
+- **Cannot reach daemon:** run `contextd status`; start the daemon and confirm the client uses the same config/XDG environment and socket path.
+- **Briefing lacks a focal task:** filesystem edits and commits alone do not open projected tasks. Record user intent or a shell/tool result with a command and exit code. Standing constraints and open authored work can still be shown without a focal failure.
+- **No learned conclusions:** the shell hook has no output. Record `observe` tool output and conclusions, then inspect the handoff report.
+- **Semantic results unavailable:** check Ollama, configured model, and 768-dimensional output. Literal search remains available; archived events are not searched.
+- **Wrong project:** check `watch_root` and the service working directory in [setup](build-walkthrough.md).

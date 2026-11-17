@@ -1,0 +1,1103 @@
+{
+  "version": "component21-eval-1",
+  "suite": "development",
+  "cases": [
+    {
+      "id": "d01-baseline",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Python baseline increment",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d01-baseline",
+      "transformation": "identity",
+      "invariant": "the judgment stays supported",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 before release_permit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 before release_permit",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "The release function adds 1 to quota_left and then calls release_permit.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d02-rename",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Consistent identifier rename",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d02-rename",
+      "transformation": "consistent_rename",
+      "invariant": "a rename applied to the claim and the evidence together stays supported",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.seats_open += 1\n    self.grant_seat()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "seats_open increases by 1 before grant_seat",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "seats_open increases by 1 before grant_seat",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "Both the claim and the listing use seats_open and grant_seat.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d03-paraphrase",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Equivalent paraphrase",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d03-paraphrase",
+      "transformation": "paraphrase",
+      "invariant": "the judgment stays supported",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "the quota left counter grows by one before the permit is released",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "the quota left counter grows by one before the permit is released",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "Grows by one is the same change as += 1, and the permit release is release_permit.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d04-comments",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Comments reordered around the same statements",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d04-comments",
+      "transformation": "comment_reorder",
+      "invariant": "comments do not change the supported judgment",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "# permit bookkeeping\ndef release(self, permit):\n    # count the release\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 before release_permit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 before release_permit",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "The executable statements are still an increment followed by release_permit.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d05-whitespace",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Whitespace around the same statements",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d05-whitespace",
+      "transformation": "whitespace",
+      "invariant": "the judgment stays supported",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n\n    self.quota_left += 1\n\n    self.release_permit()\n\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 before release_permit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 before release_permit",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "Blank lines do not change the increment or the call.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d06-negation",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Negated increment",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d06-negation",
+      "transformation": "negation",
+      "invariant": "the judgment changes from supported to contradicted",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left never increases before release_permit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left never increases before release_permit",
+          "factuality": "CONTRADICTED",
+          "expect": "presented_iff_supported",
+          "justification": "The listing increments quota_left.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d07-magnitude",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Different numeric magnitude",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d07-magnitude",
+      "transformation": "numeric_magnitude",
+      "invariant": "the judgment changes to contradicted",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 50 before release_permit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 50 before release_permit",
+          "factuality": "CONTRADICTED",
+          "expect": "presented_iff_supported",
+          "justification": "The listing adds 1, not 50.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d08-operation-order",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Reversed executable order",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d08-operation-order",
+      "transformation": "reversed_operation_order",
+      "invariant": "reordering executable statements changes the judgment",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.release_permit()\n    self.quota_left += 1\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 before release_permit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 before release_permit",
+          "factuality": "CONTRADICTED",
+          "expect": "presented_iff_supported",
+          "justification": "release_permit runs before the increment in this listing.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d09-cause",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Unsupported causal sentence",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d09-cause",
+      "transformation": "reversed_cause",
+      "invariant": "adding a cause the listing does not show makes the evidence insufficient",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "release_permit failed because quota_left increased",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "release_permit failed because quota_left increased",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The listing does not show a failure, and it does not say the increment caused one.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d10-conditional",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Conditional the listing does not state",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d10-conditional",
+      "transformation": "conditional_reversal",
+      "invariant": "a condition the listing does not contain is insufficient",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 only when the permit is already released",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 only when the permit is already released",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The increment is unconditional in this function. The permit is not tested first.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d11-conditional-flip",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Opposite conditional",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d11-conditional-flip",
+      "transformation": "conditional_reversal",
+      "invariant": "the opposite condition is also insufficient",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 only when the permit is not released",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 only when the permit is not released",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The listing has no check of whether the permit was released.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d12-javascript",
+      "suite": "development",
+      "failure_id": null,
+      "title": "JavaScript increment",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d12-javascript",
+      "transformation": "language_javascript",
+      "invariant": "the same increment shape stays supported in JavaScript",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "function release(permit) {\n  quotaLeft += 1;\n  releasePermit();\n}\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quotaLeft increases by 1 before releasePermit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quotaLeft increases by 1 before releasePermit",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "quotaLeft is increased by 1 before releasePermit().",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d13-go",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Go increment",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d13-go",
+      "transformation": "language_go",
+      "invariant": "the same increment shape stays supported in Go",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "func release(permit int) {\n    quotaLeft++\n    releasePermit()\n}\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quotaLeft increases by 1 before releasePermit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quotaLeft increases by 1 before releasePermit",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "quotaLeft is incremented before releasePermit().",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d14-rust",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Rust increment",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d14-rust",
+      "transformation": "language_rust",
+      "invariant": "the same increment shape stays supported in Rust",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "fn release(permit: i32) {\n    quota_left += 1;\n    release_permit();\n}\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 before release_permit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 before release_permit",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "quota_left is increased by 1 before release_permit().",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d15-fullwidth",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Fullwidth punctuation and an unsupported tail",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d15-fullwidth",
+      "transformation": "fullwidth_punctuation",
+      "invariant": "the combined sentence is insufficient even though the English prefix matches",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 before release_permit\u3002\u8bb8\u53ef\u5df2\u7ecf\u8017\u5c3d\u3002",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 before release_permit\u3002\u8bb8\u53ef\u5df2\u7ecf\u8017\u5c3d\u3002",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The Chinese sentence says the permit is exhausted. The listing does not say that.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d16-removed-evidence",
+      "suite": "development",
+      "failure_id": null,
+      "title": "Claim whose cited output does not contain the code",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d16-removed-evidence",
+      "transformation": "removed_evidence",
+      "invariant": "without the listing, the increment claim is insufficient",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "1 failed\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 before release_permit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 before release_permit",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The cited output is only the test summary. It does not show quota_left or release_permit.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "d17-conflict",
+      "suite": "development",
+      "failure_id": null,
+      "title": "A second listing conflicts with the cited one",
+      "initial_class": "development",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "d17-conflict",
+      "transformation": "conflicting_evidence",
+      "invariant": "conflicting listings make the standing increment claim insufficient",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p release.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def release(self, permit):\n    self.quota_left = 0\n    self.release_permit()\n",
+          "bind": "other"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "quota_left increases by 1 before release_permit",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "quota_left increases by 1 before release_permit",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "One listing increments quota_left and a second sets it to 0. Together they do not establish a standing increment of 1.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    }
+  ]
+}

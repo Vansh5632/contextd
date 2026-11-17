@@ -1,0 +1,1938 @@
+{
+  "version": "component21-eval-1",
+  "suite": "regression",
+  "cases": [
+    {
+      "id": "f00-supported-control",
+      "failure_id": null,
+      "title": "Supported control for the deliver listing",
+      "initial_class": "control",
+      "control": true,
+      "notes": "Public-protocol control recorded on 10 November 2026. Caller-supplied tool output.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "retry_count increments before open_socket",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "supported",
+          "text": "retry_count increments before open_socket",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "The listing executes retry_count += 1 and then calls open_socket().",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "session": "f00-supported-control"
+    },
+    {
+      "id": "f01-negation",
+      "failure_id": 1,
+      "title": "Negated increment admitted or rejected",
+      "initial_class": "reproduced",
+      "predicted_violation": "presented_as_reality",
+      "notes": "Public-protocol case negation_false_admit.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "retry_count never increments before open_socket",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "negation",
+          "text": "retry_count never increments before open_socket",
+          "factuality": "CONTRADICTED",
+          "expect": "presented_iff_supported",
+          "justification": "The listing increments retry_count. The conclusion says it never increments.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f01-negation"
+    },
+    {
+      "id": "f02-numeric",
+      "failure_id": 2,
+      "title": "Wrong increment magnitude",
+      "initial_class": "reproduced",
+      "predicted_violation": "presented_as_reality",
+      "notes": "Public-protocol case numeric_false_admit.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "retry_count increments by 999 before open_socket",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "magnitude",
+          "text": "retry_count increments by 999 before open_socket",
+          "factuality": "CONTRADICTED",
+          "expect": "presented_iff_supported",
+          "justification": "The listing adds 1. The conclusion says the increment is 999.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f02-numeric"
+    },
+    {
+      "id": "f03-paraphrase",
+      "failure_id": 3,
+      "title": "Paraphrase of a supported increment",
+      "initial_class": "reproduced",
+      "predicted_violation": "not_presented",
+      "notes": "Public-protocol case paraphrase_false_reject.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "the retry counter is incremented before the socket opens",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "paraphrase",
+          "text": "the retry counter is incremented before the socket opens",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "Counter and socket are the same objects as retry_count and open_socket in this listing.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f03-paraphrase"
+    },
+    {
+      "id": "f04-unicode-tail",
+      "failure_id": 4,
+      "title": "Non-ASCII tail must not inherit support",
+      "initial_class": "reproduced",
+      "predicted_violations": [
+        "presented_as_reality",
+        "not_presented"
+      ],
+      "notes": "Public-protocol case unicode_hidden_mechanism. The Chinese sentence says the database pool is exhausted.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "retry_count is incremented before open_socket\u3002\u6570\u636e\u5e93\u8fde\u63a5\u6c60\u8017\u5c3d\u3002",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "english",
+          "text": "retry_count is incremented before open_socket",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "The English clause matches the listing and can stand on its own.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        },
+        {
+          "id": "whole",
+          "text": "retry_count is incremented before open_socket\u3002\u6570\u636e\u5e93\u8fde\u63a5\u6c60\u8017\u5c3d\u3002",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The listing does not show a database connection pool. The combined text must not be one established reality.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f04-unicode-tail"
+    },
+    {
+      "id": "f05-unicode-panic",
+      "failure_id": 5,
+      "title": "Unicode casefold must not drop the query handler",
+      "initial_class": "reproduced",
+      "predicted_violation": "handler_unavailable",
+      "notes": "Public-protocol case unicode_casefold. Omega lowercases to a longer UTF-8 sequence.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "\u2126 so retry_count increments before open_socket",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "handler",
+          "text": "\u2126 so retry_count increments before open_socket",
+          "factuality": "SUPPORTED",
+          "expect": "handler_available",
+          "justification": "The request handler must accept, reject, or skip this note without panicking.",
+          "provenance": "agent",
+          "checkpoint": "final"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f05-unicode-panic"
+    },
+    {
+      "id": "f06-execution-order",
+      "failure_id": 6,
+      "title": "Text order is not execution order",
+      "initial_class": "source_analysis",
+      "predicted_violation": "presented_as_reality",
+      "notes": "open_first calls open_socket before bump. The increment appears earlier only as a function definition.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def bump(self):\n    self.attempt_budget += 1\n\ndef open_first(self):\n    self.open_socket()\n    self.bump()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget increments before open_socket",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "order",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "CONTRADICTED",
+          "expect": "presented_iff_supported",
+          "justification": "In open_first the socket call is executed before bump, which is where attempt_budget increases.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f06-execution-order"
+    },
+    {
+      "id": "f07-quantifier",
+      "failure_id": 7,
+      "title": "Idle quantifier reversal",
+      "initial_class": "source_analysis",
+      "predicted_violations": [
+        "presented_as_reality",
+        "not_presented"
+      ],
+      "notes": "The function counts items that are not idle.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p pool.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def count_active(connections):\n    return len([item for item in connections if not item.idle])\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "counts connections if idle",
+          "bind": "idle",
+          "support": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "counts connections if not idle",
+          "bind": "active",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "idle",
+          "text": "counts connections if idle",
+          "factuality": "CONTRADICTED",
+          "expect": "presented_iff_supported",
+          "justification": "The filter keeps connections whose idle flag is false.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "idle"
+        },
+        {
+          "id": "not-idle",
+          "text": "counts connections if not idle",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "The comprehension counts items for which idle is not true.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "active"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f07-quantifier"
+    },
+    {
+      "id": "f08-causality",
+      "failure_id": 8,
+      "title": "Shared names do not establish cause",
+      "initial_class": "source_analysis",
+      "predicted_violation": "presented_as_reality",
+      "notes": "The listing shows an increment and a call. It does not say either one causes the other.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.attempt_budget += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget is the cause of open_socket",
+          "bind": "forward",
+          "support": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "open_socket is the cause of attempt_budget",
+          "bind": "reverse",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "forward",
+          "text": "attempt_budget is the cause of open_socket",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "An increment followed by a call does not establish that the increment causes the call.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "forward"
+        },
+        {
+          "id": "reverse",
+          "text": "open_socket is the cause of attempt_budget",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The same listing does not establish the opposite cause either.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "reverse"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f08-causality"
+    },
+    {
+      "id": "f09-semicolon",
+      "failure_id": 9,
+      "title": "Semicolon does not license an unsupported tail",
+      "initial_class": "source_analysis",
+      "predicted_violations": [
+        "presented_as_reality",
+        "not_presented"
+      ],
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.attempt_budget += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget increments before open_socket; the database pool is exhausted",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "prefix",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "The increment-before-call clause is supported by the listing.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        },
+        {
+          "id": "whole",
+          "text": "attempt_budget increments before open_socket; the database pool is exhausted",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "Nothing in the listing says the database pool is exhausted.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f09-semicolon"
+    },
+    {
+      "id": "f09-so-split",
+      "failure_id": 9,
+      "title": "Clause marker so separates an unsupported tail",
+      "initial_class": "source_analysis",
+      "predicted_violation": "presented_as_reality",
+      "notes": "A correct split keeps the prefix and drops the unsupported tail. Admitting the whole sentence violates the contract.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.attempt_budget += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget increments before open_socket so the database pool is exhausted",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "prefix",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "The prefix restates the listing.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        },
+        {
+          "id": "whole",
+          "text": "attempt_budget increments before open_socket so the database pool is exhausted",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The tail about the database pool is not in the listing.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f09-so-split"
+    },
+    {
+      "id": "f10-compaction",
+      "failure_id": 10,
+      "title": "Compaction must not leave missing output looking verified",
+      "initial_class": "source_analysis",
+      "predicted_violation": "evidence_missing_but_presented",
+      "notes": "The long tool output is eligible for summarization. This run asks only that missing output not be presented as established support. It does not claim an already-admitted claim was observed surviving compaction; enrichment can remove the output before the first handoff.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,80p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.attempt_budget += 1\n    self.open_socket()\n\npad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad ",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget increments before open_socket",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "wait_compaction",
+          "bind": "source",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "after",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "evidence_incomplete",
+          "justification": "Once the output field is gone, the increment claim must not stay an established reality.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "evidence_bind": "source",
+          "when_presented": "evidence_missing_but_presented",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f10-compaction"
+    },
+    {
+      "id": "f11-truncation",
+      "failure_id": 11,
+      "title": "A truncated prefix is incomplete evidence",
+      "initial_class": "source_analysis",
+      "predicted_violation": "truncated_prefix_admitted",
+      "notes": "The retained prefix shows an increment of 1. The omitted tail sets the counter back to zero. The prefix alone must not verify the increment.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "self.retry_count += 1\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\ncontext line\nself.retry_count = 0\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "retry_count increments",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "prefix-only",
+          "text": "retry_count increments",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "evidence_incomplete",
+          "justification": "Tool output keeps at most 200 lines. The later reset is past that cut, so the prefix is not the whole program.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "evidence_bind": "source",
+          "when_presented": "truncated_prefix_admitted",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f11-truncation"
+    },
+    {
+      "id": "f12-multi-evidence",
+      "failure_id": 12,
+      "title": "One cited output cannot verify a two-source claim",
+      "initial_class": "contract_limitation",
+      "predicted_violation": "presented_as_reality",
+      "notes": "observe accepts one support_event_id. The test result is stored and is not the cited output.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "AssertionError: quota drift\n",
+          "bind": "test"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,20p quota.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def parse_quota():\n    return 3\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "parse_quota increments before the assertion fails",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "combined",
+          "text": "parse_quota increments before the assertion fails",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The cited listing returns 3 and does not mention an assertion. The assertion text is a different event.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f12-multi-evidence"
+    },
+    {
+      "id": "f13-wrong-task",
+      "failure_id": 13,
+      "title": "Same command in two directories stays two tasks",
+      "initial_class": "source_analysis",
+      "predicted_violation": "wrong_task",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/alpha",
+          "exit_code": 1,
+          "output": "alpha_budget += 1\n",
+          "bind": "alpha"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/beta",
+          "exit_code": 1,
+          "output": "beta_budget += 1\n",
+          "bind": "beta"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "beta_budget increments",
+          "bind": "conclusion",
+          "support": "beta"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "task",
+          "text": "beta_budget increments",
+          "factuality": "SUPPORTED",
+          "expect": "task_matches",
+          "justification": "The cited output is the command that ran in /work/beta. The claim belongs on that task.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "task_bind": "beta",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f13-wrong-task"
+    },
+    {
+      "id": "f13-empty-session",
+      "failure_id": 13,
+      "title": "Missing session ids must not merge directories",
+      "initial_class": "source_analysis",
+      "predicted_violation": "wrong_task",
+      "notes": "Both observations omit the session id.",
+      "session": "",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/left",
+          "exit_code": 1,
+          "output": "left_budget += 1\n",
+          "bind": "left",
+          "session": ""
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/right",
+          "exit_code": 1,
+          "output": "right_budget += 1\n",
+          "bind": "right",
+          "session": ""
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "right_budget increments",
+          "bind": "conclusion",
+          "support": "right",
+          "session": ""
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "task",
+          "text": "right_budget increments",
+          "factuality": "SUPPORTED",
+          "expect": "task_matches",
+          "justification": "The cited command ran in /work/right. An empty session id does not make it the /work/left task.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "task_bind": "right",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false
+    },
+    {
+      "id": "f14-author-constraint",
+      "failure_id": 14,
+      "title": "The word constraint does not make an agent note a user requirement",
+      "initial_class": "source_analysis",
+      "predicted_violation": "origin_user",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "A constraint is to keep the signature unchanged.",
+          "bind": "conclusion"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "author",
+          "text": "A constraint is to keep the signature unchanged.",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "author_is",
+          "justification": "The note was submitted as an agent conclusion. The speaker metadata, not the word constraint, decides authorship.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f14-author-constraint"
+    },
+    {
+      "id": "f14-user-requirement",
+      "failure_id": 14,
+      "title": "A user requirement outside the small normative list",
+      "initial_class": "source_analysis",
+      "predicted_violation": "missing_claim",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "user",
+          "text": "Keep the public CLI unchanged.",
+          "bind": "conclusion"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "user-requirement",
+          "text": "Keep the public CLI unchanged.",
+          "factuality": "SUPPORTED",
+          "expect": "author_is",
+          "justification": "The note was submitted with user speaker metadata. It is a requirement even though it does not mention a signature.",
+          "provenance": "user",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f14-user-requirement"
+    },
+    {
+      "id": "f15-stale-after-change",
+      "failure_id": 15,
+      "title": "A passing command does not keep an old finding current",
+      "initial_class": "source_analysis",
+      "predicted_violation": "stale_current",
+      "notes": "The unrelated widget finding stays current. A pass does not erase every earlier finding; it does retire this one because the cited source changed and the command passed.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "go test",
+          "cwd": "/work/other",
+          "exit_code": 1,
+          "output": "def flush(self):\n    self.widget_count += 1\n    self.flush_buffer()\n",
+          "bind": "other_tool",
+          "session": "other"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "widget_count increments before flush_buffer",
+          "bind": "other_claim",
+          "support": "other_tool",
+          "session": "other"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/app",
+          "exit_code": 1,
+          "output": "def deliver(self, message):\n    self.attempt_budget += 1\n    self.open_socket()\n",
+          "bind": "fail_a",
+          "session": "app"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget might increment before open_socket",
+          "bind": "hypo",
+          "support": "fail_a",
+          "session": "app"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget increments before open_socket",
+          "bind": "finding",
+          "support": "fail_a",
+          "session": "app"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "after_rev_a"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/app",
+          "exit_code": 0,
+          "output": "1 passed\n",
+          "bind": "pass_b",
+          "session": "app"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/app",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.open_socket()\n",
+          "bind": "source_b",
+          "session": "app"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "after_pass"
+        },
+        {
+          "action": "observe",
+          "kind": "retract",
+          "text": "attempt_budget increments before open_socket",
+          "bind": "retract",
+          "session": "app"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "after_correction"
+        },
+        {
+          "action": "restart"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "hypothesis",
+          "text": "attempt_budget might increment before open_socket",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "must_be_hypothesis",
+          "justification": "The note says the budget might increment. That is a hypothesis, not an established cause.",
+          "provenance": "agent",
+          "checkpoint": "after_rev_a",
+          "source_bind": "hypo"
+        },
+        {
+          "id": "finding",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "Revision A of the cited output increments attempt_budget before open_socket.",
+          "provenance": "agent",
+          "checkpoint": "after_rev_a",
+          "source_bind": "finding"
+        },
+        {
+          "id": "stale",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "must_not_be_current",
+          "justification": "The command now passes and the new source listing no longer increments attempt_budget. The old finding needs revalidation.",
+          "provenance": "agent",
+          "checkpoint": "after_pass"
+        },
+        {
+          "id": "unrelated",
+          "text": "widget_count increments before flush_buffer",
+          "factuality": "SUPPORTED",
+          "expect": "must_stay_current",
+          "justification": "The widget task was not changed by the courier command.",
+          "provenance": "agent",
+          "checkpoint": "after_pass"
+        },
+        {
+          "id": "corrected",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "must_be_superseded",
+          "justification": "A later note retracts the old finding. Client submission order is the ordering oracle.",
+          "provenance": "agent",
+          "checkpoint": "after_correction"
+        },
+        {
+          "id": "restart",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "must_be_superseded",
+          "justification": "The retraction must still hold after the daemon replays its log.",
+          "provenance": "agent",
+          "checkpoint": "final"
+        },
+        {
+          "id": "unrelated-restart",
+          "text": "widget_count increments before flush_buffer",
+          "factuality": "SUPPORTED",
+          "expect": "must_stay_current",
+          "justification": "Restart must not drop the unrelated widget finding.",
+          "provenance": "agent",
+          "checkpoint": "final"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f15-stale-after-change"
+    },
+    {
+      "id": "f15-done-reopen",
+      "failure_id": 15,
+      "title": "A later failure after a pass, task status left open",
+      "initial_class": "open",
+      "judgment": "open_contract",
+      "notes": "Whether a Done task should become Active again is an unresolved product contract. The run records task status and does not score it.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "fail"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "1 passed\n",
+          "bind": "ok"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "again"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [],
+      "suite": "regression",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f15-done-reopen"
+    },
+    {
+      "id": "f16-cross-task-retract",
+      "failure_id": 16,
+      "title": "A retraction in one task must not retire another task",
+      "initial_class": "source_analysis",
+      "predicted_violation": "superseded_other_task",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/alpha",
+          "exit_code": 1,
+          "output": "alpha_budget += 1\n",
+          "bind": "alpha_tool",
+          "session": "alpha"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "alpha_budget increments",
+          "bind": "alpha_claim",
+          "support": "alpha_tool",
+          "session": "alpha"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/beta",
+          "exit_code": 1,
+          "output": "beta_budget += 1\n",
+          "bind": "beta_tool",
+          "session": "beta"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "beta_budget increments",
+          "bind": "beta_claim",
+          "support": "beta_tool",
+          "session": "beta"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "observe",
+          "kind": "retract",
+          "text": "alpha_budget increments",
+          "bind": "retract",
+          "session": "beta"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "alpha",
+          "text": "alpha_budget increments",
+          "factuality": "SUPPORTED",
+          "expect": "must_stay_current",
+          "justification": "The retract note was submitted in the beta session. It must not supersede the alpha claim.",
+          "provenance": "agent",
+          "checkpoint": "final"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f16-cross-task-retract"
+    },
+    {
+      "id": "f16-restatement",
+      "failure_id": 16,
+      "title": "A retracted claim can be stated again",
+      "initial_class": "source_analysis",
+      "predicted_violation": "duplicate_blocks_restatement",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.attempt_budget += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget increments before open_socket",
+          "bind": "first",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "observe",
+          "kind": "retract",
+          "text": "attempt_budget increments before open_socket",
+          "bind": "retract"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget increments before open_socket",
+          "bind": "again",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "restated",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "The listing still supports the increment, and the earlier copy was retracted before this restatement.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "again"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f16-restatement"
+    },
+    {
+      "id": "f17-timestamp-order",
+      "failure_id": 17,
+      "title": "A wall-clock correction must survive replay",
+      "initial_class": "source_analysis",
+      "predicted_violation": "correction_lost",
+      "notes": "Handoff stamps extracted claims at max(timestamp)+1000ms. The user retract uses wall-clock time. Replay order is not the client order.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.attempt_budget += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget increments before open_socket",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "user_claim",
+          "kind": "retract",
+          "text_bind": "conclusion"
+        },
+        {
+          "action": "restart"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "replay",
+          "text": "attempt_budget increments before open_socket",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "must_be_superseded",
+          "justification": "The client retracted the claim after it was admitted. Replay must not apply that retract before the claim exists.",
+          "provenance": "agent",
+          "checkpoint": "final"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f17-timestamp-order"
+    },
+    {
+      "id": "f18-hedge-might",
+      "failure_id": 18,
+      "title": "Might remains a hypothesis",
+      "initial_class": "source_analysis",
+      "predicted_violations": [
+        "presented_as_reality",
+        "uncertainty_dropped"
+      ],
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.attempt_budget += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget might increment before open_socket",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "might",
+          "text": "attempt_budget might increment before open_socket",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "must_be_hypothesis",
+          "justification": "The note says the budget might increment. The listing does not turn that into a settled fact by itself, and the uncertainty should be kept.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f18-hedge-might"
+    },
+    {
+      "id": "f18-hedge-probably",
+      "failure_id": 18,
+      "title": "Probably is also uncertainty",
+      "initial_class": "source_analysis",
+      "predicted_violations": [
+        "presented_as_reality",
+        "uncertainty_dropped"
+      ],
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,40p courier.py",
+          "cwd": "/work/pkg",
+          "exit_code": 0,
+          "output": "def deliver(self, message):\n    self.attempt_budget += 1\n    self.open_socket()\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "attempt_budget probably increments before open_socket",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "probably",
+          "text": "attempt_budget probably increments before open_socket",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "must_be_hypothesis",
+          "justification": "Probably is weaker than an established fact. Dropping it or storing it as reality both miss the uncertainty.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ],
+      "suite": "regression",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f18-hedge-probably"
+    },
+    {
+      "id": "f18-trim-budget",
+      "failure_id": 18,
+      "title": "Renderer trim order is not exposed",
+      "initial_class": "source_analysis",
+      "mode": "documented",
+      "deterministic": false,
+      "blocked_reason": "unobservable",
+      "notes": "context_now has no token-budget parameter, so trim order cannot be forced through the public protocol.",
+      "steps": [],
+      "atoms": [],
+      "suite": "regression",
+      "judgment": "contract",
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f18-trim-budget"
+    },
+    {
+      "id": "f19-note-claim",
+      "failure_id": 19,
+      "title": "Direct agent claim bypasses the evidence gate",
+      "initial_class": "contract_limitation",
+      "judgment": "open_contract",
+      "notes": "agent_claim validates origin and kind and does not run evidence_relation. Admission is not verification. The product contract for this route is unresolved.",
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "pytest -q",
+          "cwd": "/work/pkg",
+          "exit_code": 1,
+          "output": "1 failed\n",
+          "bind": "pytest"
+        },
+        {
+          "action": "agent_claim",
+          "kind": "reality",
+          "text": "the pool is exhausted",
+          "confidence": "inferred"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "bypass",
+          "text": "the pool is exhausted",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "No tool output mentions a pool. Recording the route is required; calling the claim verified is not.",
+          "provenance": "agent",
+          "checkpoint": "final"
+        }
+      ],
+      "suite": "regression",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f19-note-claim"
+    },
+    {
+      "id": "f19-shell-hook",
+      "failure_id": 19,
+      "title": "Shell hooks do not capture stdout",
+      "initial_class": "contract_limitation",
+      "mode": "documented",
+      "deterministic": false,
+      "blocked_reason": "open_contract",
+      "notes": "The installed shell hook sends command, cwd, and exit code. It cannot supply the output a semantic checker would need. This is a capture limit, not a verifier defect.",
+      "steps": [],
+      "atoms": [],
+      "suite": "regression",
+      "judgment": "contract",
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f19-shell-hook"
+    },
+    {
+      "id": "f20-regex-gap",
+      "failure_id": 20,
+      "title": "Regex atom recall is not factuality",
+      "initial_class": "source_analysis",
+      "mode": "grader",
+      "deterministic": true,
+      "notes": "A required-atom style regex matches a packet that also states a contradiction. The atomic judge flags the contradiction.",
+      "steps": [],
+      "atoms": [],
+      "suite": "regression",
+      "judgment": "contract",
+      "needs_human_adjudication": false,
+      "control": false,
+      "session": "f20-regex-gap"
+    }
+  ]
+}

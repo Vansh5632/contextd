@@ -1,0 +1,12 @@
+diff --git a/courier.py b/courier.py
+index c2c52ce..b339bfb 100644
+--- a/courier.py
++++ b/courier.py
+@@ -9,7 +9,6 @@ class Courier:
+             self.socket = _Link(self)
+ 
+     def deliver(self, message):
+-        self.retry_count += 1
+         self.open_socket()
+         try:
+             self.socket.send(message)

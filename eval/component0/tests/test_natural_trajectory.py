@@ -61,7 +61,7 @@ def test_natural_trajectory_admits_only_grounded_claims() -> None:
     assert any("signature unchanged" in text for text in texts)
     assert any("Do not add a dependency." in text for text in texts)
     assert any(text.startswith("I'll move") for text in texts)
-    assert any("not counted" in text for text in texts)
+    assert all("not counted" not in text for text in texts)
     joined = "\n".join(texts)
     assert "port check" not in joined
     assert "stalled flush" not in joined
@@ -74,6 +74,7 @@ def test_natural_trajectory_admits_only_grounded_claims() -> None:
     reasons = " ".join(item["reason"] for item in report["skipped"])
     assert "still failing" in reasons
     assert "not grounded" in reasons or "speech act" in reasons
+    assert "contradicts" in reasons
 
     snapshot = report["snapshot"]
     focal = snapshot["focal_task"]
@@ -92,3 +93,30 @@ def test_natural_trajectory_admits_only_grounded_claims() -> None:
     assert scored["required_recall"] == 1
     assert scored["stale_as_current"] == 0
     assert scored["unresolved_present"] is True
+    assert scored["stale_as_current"] == 0
+
+
+def test_a_retract_is_not_required_to_drop_the_contradicted_sentence() -> None:
+    records = [row for row in _records() if row.get("type") != "retract"]
+    without = project_events(adapt_trace(records))
+    with_retract = project_events(adapt_trace(_records()))
+
+    def claims(report: dict) -> list[str]:
+        return sorted(
+            item["text"]
+            for item in report["accepted"]
+            if item["kind"] not in {"retract", "conflict"}
+        )
+
+    assert claims(without) == claims(with_retract)
+    assert all("not counted" not in text for text in claims(without))
+    blob = json.dumps(without["snapshot"])
+    assert "not counted" not in blob
+    scored = score_packet(
+        split_units(blob, "contextd"),
+        load_atoms(EPISODE / "gold" / "atoms.yaml"),
+        _Tokens(),
+        raw_text=blob,
+    )
+    assert scored["required_recall"] == 1
+    assert scored["stale_as_current"] == 0

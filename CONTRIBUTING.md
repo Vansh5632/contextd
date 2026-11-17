@@ -1,115 +1,42 @@
 # Contributing to contextd
 
-Thank you for your interest in contributing! This document explains the workflow to follow when making changes.
+Start with the [documentation index](docs/README.md), [current architecture](docs/architecture.md), and [status and limits](docs/status.md). Dated design/validation reports describe their own snapshots; they are not a mandate to retain obsolete runtime behavior.
 
----
+## Branch and pull request workflow
 
-## Branch Workflow
-
-We use a structured branching model:
-
-```
-main        ← stable, tagged releases only
-  ↑
-staging     ← pre-release integration testing
-  ↑
-develop     ← active development, all PRs target here
-  ↑
-feat/*  fix/*  docs/*  chore/*  ← your working branches
-```
-
-### Rules
-
-- **Never push directly to `main` or `develop`**
-- Always branch off `develop` (exception: `hotfix/*` branches off `main`)
-- All changes go through a Pull Request
-
----
-
-## Step-by-Step: Making a Change
-
-### 1. Fork & Clone
+Use a working branch from `develop`; target `develop` with a pull request. Hotfix branches may start from `main`. Keep direct changes off `main` and `develop`. The repository PR template records this workflow.
 
 ```bash
 git clone https://github.com/vansh5632/contextd.git
 cd contextd
-git remote add upstream https://github.com/vansh5632/contextd.git
+git switch develop
+git switch -c docs/your-change
 ```
 
-### 2. Create Your Branch
+If contributing through a fork, clone your fork and configure the canonical repository as `upstream`; update your base before branching. Use `feat/`, `fix/`, `docs/`, or `chore/` names appropriate to the change. Commit only intended files; preserve unrelated local work.
 
-Branch off `develop` using the naming convention:
+Use conventional commit messages such as:
 
-| Type | Branch Name Example |
-|---|---|
-| New feature | `feat/shell-watcher` |
-| Bug fix | `fix/memory-leak` |
-| Documentation | `docs/architecture-update` |
-| Chore / config | `chore/setup-linter` |
-| Emergency hotfix | `hotfix/critical-crash` (off `main`) |
-
-```bash
-git checkout develop
-git pull upstream develop
-git checkout -b feat/your-feature-name
+```text
+fix(broker): reject unsupported conclusion clauses
+docs: refresh current architecture and setup
 ```
 
-### 3. Make Changes & Commit
+Open an issue first for significant new features, architecture changes, or new dependencies. Small fixes and documentation improvements can go directly to a PR. Fill out [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md), describe the problem/result, link related issues, and state what was actually checked.
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
+## Implementation standards
 
-```
-feat: add shell command watcher
-fix: resolve memory leak in event buffer
-docs: update architecture overview
-chore: configure clippy
-refactor: simplify importance scorer logic
-test: add unit tests for use-case classifier
-```
+- Follow existing Rust workspace structure and conventions; use `rustfmt` and `clippy`.
+- Reuse existing helpers and dependencies. Keep changes small and complete across callers, schemas, tests, and docs.
+- Keep the runtime local-first, and keep event recording functional when optional embeddings are unavailable.
+- Preserve trust-boundary validation, errors, claim provenance/confidence, and replayable claim mutations.
+- Add focused tests for new behavior or regressions. Keep tests isolated from personal config, profiles, repositories, and recorded data.
+- Never commit credentials, personal context dumps, or generated evaluation runs. CI rejects configured generated-dump and agent-plan paths.
+- Do not introduce external model/runtime services without an explicit request. Live-agent evaluation can use external services and requires explicit authorization for spend.
 
-```bash
-git add .
-git commit -m "feat: add shell command watcher"
-```
+## Checks
 
-### 4. Push Your Branch
-
-```bash
-git push origin feat/your-feature-name
-```
-
-### 5. Open a Pull Request
-
-- Target branch: **`develop`**
-- Fill out the PR template completely
-- Link any related issues using `Closes #123`
-
----
-
-## Commit Message Format
-
-```
-<type>(<optional scope>): <short summary>
-
-<optional body>
-
-<optional footer: Closes #issue>
-```
-
-**Types:** `feat` | `fix` | `docs` | `chore` | `refactor` | `test` | `perf` | `ci`
-
----
-
-## Code Standards
-
-- Language: **Rust** — follow `rustfmt` and `clippy` rules
-- All public functions must have comments
-- No external dependencies without prior discussion in an issue
-- Keep everything local-first — no cloud calls, no API keys in code
-
-### Local CI Preflight
-
-Before opening a PR, run the same checks used by CI:
+Run the checks in [TESTING.md](TESTING.md). Rust CI preflight from the root is:
 
 ```bash
 cargo fmt --all -- --check
@@ -118,21 +45,12 @@ cargo check --workspace --all-targets --all-features
 cargo test --workspace --all-features
 ```
 
----
+CI also runs focused Python extraction/admission tests. Use the [harness instructions](TESTING.md#evaluation-harness) when changing extraction, observations, episodes, or evaluation logic. Distinguish local unit tests, manual protocol checks, and live-agent benchmarks in your PR.
 
-## What Needs an Issue First?
+## Documentation
 
-Open an issue before starting work on:
-- New features or significant changes
-- Changes to the core architecture
-- New external dependencies
+Keep [docs/architecture.md](docs/architecture.md) as the current implementation reference and [docs/status.md](docs/status.md) as the current status/limits reference. Update [docs/README.md](docs/README.md) when adding a guide or report. Preserve dated reports and their numbers; add a status banner or successor link instead of rewriting past results as new verification. Keep existing report paths stable.
 
-Small bug fixes and docs improvements can go straight to a PR.
+## License
 
----
-
-## Commercial Use
-
-This project is licensed under the **PolyForm Noncommercial License 1.0.0**.  
-Commercial use requires explicit permission from the author.  
-See [LICENSE](LICENSE) for details.
+The checked-in [LICENSE](LICENSE) is **PolyForm Noncommercial 1.0.0**. See its terms and contact the author for commercial permission. The workspace's `MIT OR Apache-2.0` package metadata currently disagrees with that file; do not infer a relicensing from package metadata or old README text.

@@ -124,6 +124,79 @@ def overlap(claim: str, support: str) -> int:
     return len(content_tokens(claim) & content_tokens(support))
 
 
+# Same closed list as INTERPRETIVE in crates/broker/src/extract.rs. A content word
+# outside this list has to appear in the cited output or the clause is dropped.
+_INTERPRETIVE = frozenset(
+    {
+        "above", "already", "below", "branch", "cause", "count", "counted",
+        "counting", "counts", "expected", "expects", "failed", "fails",
+        "failure", "failures", "first", "increment", "incremented", "increments",
+        "means", "never", "path", "reached", "stay", "stayed", "stays", "test",
+        "tests", "toward", "towards", "until", "where",
+    }
+)
+_CLAUSE_MARKERS = (" so ", " because ", " means ", " and ", " but ")
+_DENIALS = (
+    "not counted", "isn't counted", "is not counted", "never counted",
+    "not incremented", "does not increment", "doesn't increment",
+    "stays at zero", "stay at zero", "remains at zero", "at zero", "stays at 0",
+)
+
+
+def _clauses(sentence: str) -> list[str]:
+    lower = sentence.lower()
+    start = 0
+    found: list[str] = []
+    while start < len(sentence):
+        remainder = lower[start:]
+        hits = [(remainder.find(marker), len(marker)) for marker in _CLAUSE_MARKERS]
+        hits = [(index, length) for index, length in hits if index >= 0]
+        if not hits:
+            end, length = len(sentence), 0
+        else:
+            index, length = min(hits)
+            end = start + index
+        clause = sentence[start:end].strip(" ,;")
+        if clause:
+            found.append(clause)
+        if length == 0:
+            break
+        start = end + length
+    return found
+
+
+def _denies(text: str) -> bool:
+    lower = text.lower()
+    return any(phrase in lower for phrase in _DENIALS)
+
+
+def _has_count_increment(support: str) -> bool:
+    return re.search(r"(?i)\b[A-Za-z_][A-Za-z0-9_]*count[A-Za-z0-9_]*\s*\+=\s*[1-9]", support) is not None
+
+
+def _residue(clause: str, support: str) -> bool:
+    known = content_tokens(support) | _INTERPRETIVE
+    return any(token not in known for token in content_tokens(clause))
+
+
+def _kept_clauses(sentence: str, support: str) -> list[str]:
+    clauses = _clauses(sentence)
+    kept: list[str] = []
+    for clause in clauses:
+        if _denies(clause) and (_denies(sentence) and _has_count_increment(support)):
+            continue
+        if _residue(clause, support) or overlap(clause, support) < 1:
+            continue
+        if overlap(sentence, support) < MIN_OVERLAP:
+            continue
+        kept.append(clause)
+    if not kept:
+        return []
+    if len(kept) == len(clauses):
+        return [sentence]
+    return kept
+
+
 def _shell_state(
     event: dict[str, Any],
 ) -> tuple[tuple[str, str], int | None] | None:
@@ -459,21 +532,30 @@ def _drafts_for_note(
 
     if _is_source_read(previous):
         support = str((previous.get("payload") or {}).get("output") or "")
-        if overlap(text, support) >= MIN_OVERLAP:
-            return [
-                _draft(
-                    note,
-                    suffix="",
-                    kind="reality",
-                    origin="agent",
-                    confidence="inferred",
-                    text=text,
-                    source_text=text,
-                    task=task,
-                    support=support,
-                    extra_evidence=(previous,),
+        drafts = []
+        span_index = 0
+        for sentence in _SENTENCE.split(text):
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            for span in _kept_clauses(sentence, support):
+                suffix = "" if span_index == 0 else str(span_index)
+                span_index += 1
+                drafts.append(
+                    _draft(
+                        note,
+                        suffix=suffix,
+                        kind="reality",
+                        origin="agent",
+                        confidence="inferred",
+                        text=span,
+                        source_text=text,
+                        task=task,
+                        support=support,
+                        extra_evidence=(previous,),
+                    )
                 )
-            ]
+        return drafts
     return []
 
 

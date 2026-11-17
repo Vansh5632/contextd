@@ -1,55 +1,7 @@
-# CLAUDE.md
+# Claude guidance
 
-**Project:** contextd  
-**One-liner:** A fully local, Linux-first context broker that turns your entire development machine into one shared cognitive workspace for every AI coding agent you use.
+Read [Agent.md](Agent.md) first; it contains the shared repository rules. Use the [documentation index](docs/README.md), [current architecture](docs/architecture.md), [status](docs/status.md), and [testing guide](TESTING.md) as the maintained references.
 
-## What We Are Building
+For using contextd from Claude or another MCP client, follow [connecting agents](docs/connecting-agents.md). `contextd mcp` is a stdio bridge and needs the daemon already running. The current tools are `context_now`, `search_context`, `recall_similar`, `set_intent`, and `note_claim`.
 
-contextd is **not** another AI coding assistant.  
-It is the **neutral infrastructure layer** that sits underneath Cursor, Claude, Continue.dev, Windsurf, terminal agents, etc.
-
-It solves the core fragmentation problem: every AI tool is blind to what the others know. contextd watches your shell, editor, filesystem, git, processes, and project files in real time and maintains a single, always-up-to-date, structured "what am I doing right now" context snapshot that any agent can instantly read via MCP or Unix socket.
-
-Everything runs 100% locally. No cloud. No API keys. Single Rust binary + systemd user service.
-
-## Core Architecture (Finalized)
-
-- **Use-case aware** from the first millisecond (coding / research / general productivity / etc.)
-- **4-tier hierarchical memory system** (inspired by MemGPT + Mem0 + CoALA + MemoryOS 2025)
-  - Tier 0: Working Memory (in-RAM live snapshot)
-  - Tier 1: Short-term (SQLite + vector, 24-48h)
-  - Tier 2: Mid-term (vector + knowledge graph – semantic + procedural)
-  - Tier 3: Long-term Archive (compressed blobs)
-- **Real-time hot path** → Use-case classifier → Importance scorer → Content processor → Memory-type classifier → Decision engine
-- **Background intelligence layer** (consolidation, summarization, graph building, pruning)
-- **Public interfaces**: MCP server + Unix domain socket (`/context/now`)
-
-## Current Status (March 2026)
-
-We have finalized:
-- Full system design (use-case routing + 4-tier memory)
-- Rust tech stack decision
-- Event sources strategy
-- Memory pipeline flowchart
-
-We are now starting clean implementation of the Rust daemon.
-
-## Tech Stack (Locked)
-
-- Core daemon: Rust (single static binary)
-- Local AI: Ollama (Phi-3 Mini + nomic-embed-text)
-- Storage: SQLite + pure-Rust vector similarity
-- VS Code extension: TypeScript (thin client)
-- Shell/Git hooks: Bash
-- Protocol: MCP (Model Context Protocol) + custom Unix socket
-
-## How You Should Help Me
-
-When I ask you to write code:
-1. Always respect the finalized architecture above.
-2. Keep everything local-first and single-binary friendly.
-3. Prefer pure Rust where possible.
-4. Follow the internal package structure we will define.
-5. Think in terms of performance, privacy, and zero-friction install.
-
-This is the foundation of what will become a major developer infrastructure product. Treat every line you write with that level of seriousness.
+When working on this repository, treat dated research/validation documents as historical evidence. Component 2.1 is not frozen, and an admitted inferred claim is not a verified fact. Avoid copying an old architecture description into new instructions; update the canonical guide when behavior changes.

@@ -1,5 +1,7 @@
 # Component 1 validation
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Measured on 30 October 2026, against the working tree at `bf1826c` plus the uncommitted Component 1 projector, claim, and `context_now` changes. The binary under test is `target/debug/contextd`, built at 2026-10-30 19:36:47 +0530.
 
 This note answers one question:

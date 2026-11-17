@@ -30,7 +30,7 @@ Closes #<!-- issue number -->
 - [ ] I have updated documentation if needed
 - [ ] CI is passing (`fmt`, `clippy`, `check`, and `test`)
 - [ ] No API keys, secrets, or cloud dependencies introduced
-- [ ] Everything runs 100% locally
+- [ ] Runtime defaults remain local; any configured remote endpoints or external-agent evaluation are documented
 
 ## Testing Done
 

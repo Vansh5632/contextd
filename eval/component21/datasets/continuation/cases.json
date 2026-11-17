@@ -1,0 +1,98 @@
+{
+  "version": "component21-eval-1",
+  "suite": "continuation",
+  "cases": [
+    {
+      "id": "c01-poor-handoff-solved",
+      "suite": "continuation",
+      "failure_id": null,
+      "title": "Agent completes the task from a poor handoff",
+      "initial_class": "control",
+      "judgment": "metric",
+      "mode": "synthetic",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": true,
+      "handoff_quality": "poor",
+      "expected_layer": "agent",
+      "trace": {
+        "solved": true,
+        "turns_to_first_useful_action": 6,
+        "incorrect_actions_caused_by_memory": 0,
+        "tokens": 18000,
+        "tool_calls": 9,
+        "latency_ms": 1200,
+        "repeated_work": 2
+      }
+    },
+    {
+      "id": "c02-good-handoff-failed",
+      "suite": "continuation",
+      "failure_id": null,
+      "title": "Agent fails after a high-quality handoff",
+      "initial_class": "control",
+      "judgment": "metric",
+      "mode": "synthetic",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": true,
+      "handoff_quality": "good",
+      "expected_layer": "agent",
+      "trace": {
+        "solved": false,
+        "turns_to_first_useful_action": null,
+        "incorrect_actions_caused_by_memory": 0,
+        "tokens": 9000,
+        "tool_calls": 4,
+        "latency_ms": 800,
+        "repeated_work": 0
+      }
+    },
+    {
+      "id": "c03-memory-caused-wrong-edit",
+      "suite": "continuation",
+      "failure_id": null,
+      "title": "A poor handoff causes an incorrect action",
+      "initial_class": "control",
+      "judgment": "metric",
+      "mode": "synthetic",
+      "deterministic": true,
+      "needs_human_adjudication": false,
+      "control": true,
+      "handoff_quality": "poor",
+      "expected_layer": "memory",
+      "trace": {
+        "solved": false,
+        "turns_to_first_useful_action": 3,
+        "incorrect_actions_caused_by_memory": 2,
+        "tokens": 14000,
+        "tool_calls": 8,
+        "latency_ms": 1500,
+        "repeated_work": 3
+      }
+    },
+    {
+      "id": "c04-live-matrix",
+      "suite": "continuation",
+      "failure_id": null,
+      "title": "Live agent matrix",
+      "initial_class": "open",
+      "judgment": "open_contract",
+      "mode": "documented",
+      "deterministic": false,
+      "needs_human_adjudication": false,
+      "control": false,
+      "blocked_reason": "spend_not_authorized",
+      "controls": [
+        "none",
+        "raw_observations",
+        "oracle_handoff",
+        "current_contextd",
+        "future_candidate"
+      ],
+      "notes": "The only experimental variable is the memory condition. Use one model, one budget, the same tools, the same environment, and the same stopping rule. Gold facts must not be recoverable by reading the workspace or by rerunning the tests. Arms: none, raw observations, oracle handoff, current contextd, and a future candidate. Repeated trials are required before any interval is treated as stable. This milestone does not launch that matrix.",
+      "steps": [],
+      "atoms": []
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 # What a handoff should keep
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Research note for Problem B: the briefing keeps routine commands and drops the notes a successor cannot reconstruct. Written 1 November 2026 from `docs/working-state-representation.md` sections 3 and 11, the Component 1 measurements, and the papers below.
 
 This note decides what the briefing is for. It does not change the projector. The implementation plan is `docs/superpowers/plans/2026-11-01-keep-load-bearing-handoff.md`.

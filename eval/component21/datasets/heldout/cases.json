@@ -1,0 +1,408 @@
+{
+  "version": "component21-eval-1",
+  "suite": "heldout",
+  "cases": [
+    {
+      "id": "h01-rust-supported",
+      "suite": "heldout",
+      "failure_id": null,
+      "title": "Held-out Rust increment",
+      "initial_class": "heldout",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": true,
+      "control": false,
+      "session": "h01-rust-supported",
+      "review": {
+        "adjudicator": "harness author",
+        "independent_second_review": false,
+        "rule": "The justification cites the fixture text. A second reviewer has not signed this seal."
+      },
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "probe",
+          "cwd": "/work/held",
+          "exit_code": 1,
+          "output": "probe failed\n",
+          "bind": "probe"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,20p settle.rs",
+          "cwd": "/work/held",
+          "exit_code": 0,
+          "output": "fn settle(batch: Batch) {\n    ledger_slots += 1;\n    commit_batch();\n}\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "ledger_slots increases by 1 before commit_batch",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "ledger_slots increases by 1 before commit_batch",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "settle adds 1 to ledger_slots and then calls commit_batch.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "h02-rust-order",
+      "suite": "heldout",
+      "failure_id": null,
+      "title": "Held-out Rust reversed calls",
+      "initial_class": "heldout",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": true,
+      "control": false,
+      "session": "h02-rust-order",
+      "review": {
+        "adjudicator": "harness author",
+        "independent_second_review": false,
+        "rule": "The justification cites the fixture text. A second reviewer has not signed this seal."
+      },
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "probe",
+          "cwd": "/work/held",
+          "exit_code": 1,
+          "output": "probe failed\n",
+          "bind": "probe"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,20p settle.rs",
+          "cwd": "/work/held",
+          "exit_code": 0,
+          "output": "fn settle(batch: Batch) {\n    commit_batch();\n    ledger_slots += 1;\n}\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "ledger_slots increases by 1 before commit_batch",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "ledger_slots increases by 1 before commit_batch",
+          "factuality": "CONTRADICTED",
+          "expect": "presented_iff_supported",
+          "justification": "settle calls commit_batch before it increments ledger_slots.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "h03-js-decrement",
+      "suite": "heldout",
+      "failure_id": null,
+      "title": "Held-out JavaScript decrement",
+      "initial_class": "heldout",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": true,
+      "control": false,
+      "session": "h03-js-decrement",
+      "review": {
+        "adjudicator": "harness author",
+        "independent_second_review": false,
+        "rule": "The justification cites the fixture text. A second reviewer has not signed this seal."
+      },
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "probe",
+          "cwd": "/work/held",
+          "exit_code": 1,
+          "output": "probe failed\n",
+          "bind": "probe"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,20p drain.js",
+          "cwd": "/work/held",
+          "exit_code": 0,
+          "output": "function drain(node) {\n  meshQuota -= 1;\n  closeChannel();\n}\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "meshQuota decreases by 1 before closeChannel",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "meshQuota decreases by 1 before closeChannel",
+          "factuality": "SUPPORTED",
+          "expect": "presented_iff_supported",
+          "justification": "drain subtracts 1 from meshQuota and then calls closeChannel.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "h04-js-negation",
+      "suite": "heldout",
+      "failure_id": null,
+      "title": "Held-out negation of a decrement",
+      "initial_class": "heldout",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": true,
+      "control": false,
+      "session": "h04-js-negation",
+      "review": {
+        "adjudicator": "harness author",
+        "independent_second_review": false,
+        "rule": "The justification cites the fixture text. A second reviewer has not signed this seal."
+      },
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "probe",
+          "cwd": "/work/held",
+          "exit_code": 1,
+          "output": "probe failed\n",
+          "bind": "probe"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,20p drain.js",
+          "cwd": "/work/held",
+          "exit_code": 0,
+          "output": "function drain(node) {\n  meshQuota -= 1;\n  closeChannel();\n}\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "meshQuota never decreases before closeChannel",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "meshQuota never decreases before closeChannel",
+          "factuality": "CONTRADICTED",
+          "expect": "presented_iff_supported",
+          "justification": "drain does decrease meshQuota before closeChannel.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "h05-go-guard",
+      "suite": "heldout",
+      "failure_id": null,
+      "title": "Held-out guarded decrement",
+      "initial_class": "heldout",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": true,
+      "control": false,
+      "session": "h05-go-guard",
+      "review": {
+        "adjudicator": "harness author",
+        "independent_second_review": false,
+        "rule": "The justification cites the fixture text. A second reviewer has not signed this seal."
+      },
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "probe",
+          "cwd": "/work/held",
+          "exit_code": 1,
+          "output": "probe failed\n",
+          "bind": "probe"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,20p queue.go",
+          "cwd": "/work/held",
+          "exit_code": 0,
+          "output": "func pop(q *Queue) {\n    if q.depth > 0 {\n        q.depth--\n    }\n}\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "depth decreases whenever pop is called",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "depth decreases whenever pop is called",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "pop decreases depth only when depth is already greater than zero.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    },
+    {
+      "id": "h06-mixed-tail",
+      "suite": "heldout",
+      "failure_id": null,
+      "title": "Held-out unsupported Spanish tail",
+      "initial_class": "heldout",
+      "judgment": "contract",
+      "mode": "daemon",
+      "deterministic": true,
+      "needs_human_adjudication": true,
+      "control": false,
+      "session": "h06-mixed-tail",
+      "review": {
+        "adjudicator": "harness author",
+        "independent_second_review": false,
+        "rule": "The justification cites the fixture text. A second reviewer has not signed this seal."
+      },
+      "steps": [
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "probe",
+          "cwd": "/work/held",
+          "exit_code": 1,
+          "output": "probe failed\n",
+          "bind": "probe"
+        },
+        {
+          "action": "observe",
+          "kind": "tool",
+          "command": "sed -n 1,20p settle.rs",
+          "cwd": "/work/held",
+          "exit_code": 0,
+          "output": "fn settle(batch: Batch) {\n    ledger_slots += 1;\n    commit_batch();\n}\n",
+          "bind": "source"
+        },
+        {
+          "action": "observe",
+          "kind": "conclusion",
+          "text": "ledger_slots increases by 1 before commit_batch. El lote fue rechazado.",
+          "bind": "conclusion",
+          "support": "source"
+        },
+        {
+          "action": "handoff"
+        },
+        {
+          "action": "now"
+        },
+        {
+          "action": "checkpoint",
+          "name": "final"
+        }
+      ],
+      "atoms": [
+        {
+          "id": "claim",
+          "text": "ledger_slots increases by 1 before commit_batch. El lote fue rechazado.",
+          "factuality": "INSUFFICIENT_EVIDENCE",
+          "expect": "presented_iff_supported",
+          "justification": "The listing does not say the batch was rejected. The Spanish sentence is not established.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "source_bind": "conclusion"
+        }
+      ]
+    }
+  ]
+}

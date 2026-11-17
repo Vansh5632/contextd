@@ -1,5 +1,7 @@
 # Component 2 design
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Design for the smallest extractor that can feed Component 1. Written 2 November 2026 from `docs/component-2-research.md`. The measurements that follow this design are in `docs/component-2-validation.md`.
 
 ## Decision
