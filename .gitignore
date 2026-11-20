@@ -28,6 +28,12 @@ Cargo.lock
 # Agent implementation plans. Local only.
 docs/superpowers/
 
+# Product eval run output. Episodes and the harness are committed; reports are not.
+eval/reports/
+eval/.cache/
+__pycache__/
+*.pyc
+
 # Generated Component 2 briefing. The score note is docs/component-2-validation.md.
 eval/component0/episodes/**/packets/contextd_component2.txt
 eval/component0/episodes/**/packets/contextd_component2_claims.json

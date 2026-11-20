@@ -1,0 +1,25 @@
+name: agent-handoff-restraint
+level: l2
+category: agent-handoff
+restraint: true
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: auth
+    offset: -2h
+    intent: fix concurrent rate limiter
+    events:
+      - source: file_system
+        payload: {path: src/auth.rs, action: Modify}
+  - session: current
+    offset: -5s
+    intent: fix payment webhook signature validation
+    events:
+      - source: file_system
+        payload: {path: src/payments/webhook.rs, action: Modify}
+prompt: "Fix payment webhook signature validation."
+gold:
+  required: []
+  forbidden: ["concurrent rate limiter", "auth.rs"]
+layers: [0]
+l0_queries:
+  - {query: now}

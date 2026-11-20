@@ -1,0 +1,24 @@
+name: incident-recovery-restraint
+level: l2
+category: incident-recovery
+restraint: true
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: sev
+    offset: -2h
+    events:
+      - source: note
+        payload: {kind: finding, text: "prod 429 spike started after deploy abc123"}
+  - session: current
+    offset: -5s
+    intent: fix payment webhook signature validation
+    events:
+      - source: file_system
+        payload: {path: src/payments/webhook.rs, action: Modify}
+prompt: "Fix payment webhook signature validation."
+gold:
+  required: []
+  forbidden: ["deploy abc123"]
+layers: [0]
+l0_queries:
+  - {query: now}

@@ -1,0 +1,20 @@
+name: multi-repo
+level: l2
+category: multi-repo
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: two
+    offset: -3h
+    events:
+      - source: file_system
+        payload: {path: /srv/auth/src/lib.rs, action: Modify}
+      - source: file_system
+        payload: {path: /srv/gateway/src/routes.rs, action: Modify}
+      - source: note
+        payload: {kind: finding, text: gateway retries must match auth window}
+prompt: "Continue the auth and gateway work."
+gold:
+  required: ["gateway retries must match"]
+layers: [0]
+l0_queries:
+  - {query: search, text: gateway retries must match, limit: 10}

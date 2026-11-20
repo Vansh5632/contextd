@@ -1,0 +1,16 @@
+name: negative-knowledge-config
+level: l2
+category: negative-knowledge
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: cfg
+    offset: -5h
+    events:
+      - source: note
+        payload: {kind: finding, text: Config is loading correctly}
+prompt: "Debug the auth 429s."
+gold:
+  required: ["Config is loading correctly"]
+layers: [0]
+l0_queries:
+  - {query: search, text: Config is loading, limit: 10}

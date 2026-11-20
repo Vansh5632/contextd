@@ -1,0 +1,16 @@
+name: incident-recovery-page
+level: l2
+category: incident-recovery
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: page
+    offset: -90m
+    events:
+      - source: note
+        payload: {kind: finding, text: "pager duty fired on login-p95"}
+prompt: "Finish the rollout work."
+gold:
+  required: ["login-p95"]
+layers: [0]
+l0_queries:
+  - {query: search, text: login-p95, limit: 10}

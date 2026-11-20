@@ -1,0 +1,40 @@
+name: live-error
+level: l1
+category: recent-failure
+restraint: false
+requires_embeddings: false
+repo:
+  kind: fixture
+  path: fixtures/auth-service
+history:
+  - session: failure
+    offset: -15s
+    events:
+      - source: shell
+        payload:
+          command: cargo test login_rate_limit
+          exit_code: 101
+          cwd: /tmp/auth-service
+          stderr: |
+            thread 'auth::login_rate_limit' panicked at src/auth.rs:22:9:
+            assertion failed: remaining > 0
+      - source: file_system
+        payload:
+          path: src/auth.rs
+          action: Modify
+prompt: "Why did that fail? Do not rerun the tests. Do not ask me what I ran."
+gold:
+  required:
+    - login_rate_limit
+    - src/auth.rs
+  forbidden: []
+  expected_tools:
+    - context_now
+validation:
+  cheat_commands:
+    - cargo test
+    - pytest
+layers: [0, 1]
+arms: [none, dump, mcp]
+l0_queries:
+  - query: now

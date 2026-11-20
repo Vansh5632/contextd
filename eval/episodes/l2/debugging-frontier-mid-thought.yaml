@@ -1,0 +1,27 @@
+name: debugging-frontier-mid-thought
+level: l2
+category: debugging-frontier
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: stop
+    offset: -25m
+    events:
+      - source: note
+        payload: {kind: finding, text: failure occurs under concurrent login}
+      - source: note
+        payload: {kind: ruled_out, text: database lock contention}
+      - source: note
+        payload: {kind: hypothesis, text: AtomicUsize decrement race}
+      - source: note
+        payload: {kind: next_step, text: inspect concurrent decrement path}
+prompt: "Continue."
+gold:
+  frontier:
+    known: ["concurrent login"]
+    ruled_out: ["database lock contention"]
+    hypothesis: ["AtomicUsize"]
+    next_step: ["decrement"]
+layers: [0]
+l0_queries:
+  - {query: search, text: concurrent login, limit: 20}
+  - {query: search, text: AtomicUsize, limit: 10}

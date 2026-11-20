@@ -1,0 +1,16 @@
+name: long-term-recall-three-days
+level: l2
+category: long-term-recall
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: old
+    offset: -3d
+    events:
+      - source: note
+        payload: {kind: finding, text: FEATURE_X=false is required to reproduce}
+prompt: "Didn't we already try this?"
+gold:
+  required: ["FEATURE_X=false"]
+layers: [0]
+l0_queries:
+  - {query: search, text: FEATURE_X, limit: 10}

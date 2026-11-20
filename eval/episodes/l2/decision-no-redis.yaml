@@ -1,0 +1,18 @@
+name: decision-no-redis
+level: l2
+category: decision-memory
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: arch
+    offset: -3d
+    events:
+      - source: note
+        payload: {kind: decision, text: Keep rate limiting local for v1, reason: operational complexity}
+prompt: "Implement the rate limiter fix."
+gold:
+  required: ["Keep rate limiting local"]
+  decisions:
+    - {text: Keep rate limiting local for v1}
+layers: [0]
+l0_queries:
+  - {query: search, text: Keep rate limiting local, limit: 10}

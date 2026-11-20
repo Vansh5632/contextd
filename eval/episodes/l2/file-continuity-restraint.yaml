@@ -1,0 +1,26 @@
+name: file-continuity-restraint
+level: l2
+category: file-continuity
+restraint: true
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: files
+    offset: -2h
+    events:
+      - source: file_system
+        payload: {path: src/auth/rate_limit.rs, action: Modify}
+      - source: note
+        payload: {kind: finding, text: the decrement lives in allow_login}
+  - session: current
+    offset: -5s
+    intent: fix payment webhook signature validation
+    events:
+      - source: file_system
+        payload: {path: src/payments/webhook.rs, action: Modify}
+prompt: "Fix payment webhook signature validation."
+gold:
+  required: []
+  forbidden: ["rate_limit.rs", "allow_login"]
+layers: [0]
+l0_queries:
+  - {query: now}

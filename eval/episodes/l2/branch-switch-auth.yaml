@@ -1,0 +1,29 @@
+name: branch-switch-auth
+level: l2
+category: branch-switching
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: monday-am
+    offset: -1d
+    intent: fix concurrent rate limiter
+    events:
+      - source: git
+        payload: {action: checkout, to: feature/auth-rate-limit, message: feature/auth-rate-limit}
+      - source: note
+        payload: {kind: hypothesis, text: AtomicUsize decrement race}
+  - session: monday-pm
+    offset: -4h
+    intent: add Stripe retry handling
+    events:
+      - source: git
+        payload: {action: checkout, to: feature/payment-webhook, message: feature/payment-webhook}
+      - source: file_system
+        payload: {path: src/payments/stripe.rs, action: Modify}
+prompt: "Continue the auth work."
+gold:
+  required: ["AtomicUsize", "auth-rate-limit"]
+  forbidden: ["Stripe retry handling"]
+layers: [0]
+l0_queries:
+  - {query: search, text: AtomicUsize, limit: 20}
+  - {query: search, text: auth-rate-limit, limit: 10}

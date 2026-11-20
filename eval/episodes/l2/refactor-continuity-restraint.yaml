@@ -1,0 +1,24 @@
+name: refactor-continuity-restraint
+level: l2
+category: refactor-continuity
+restraint: true
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: plan
+    offset: -2h
+    events:
+      - source: note
+        payload: {kind: decision, text: Migration must remain backwards compatible}
+  - session: current
+    offset: -5s
+    intent: fix payment webhook signature validation
+    events:
+      - source: file_system
+        payload: {path: src/payments/webhook.rs, action: Modify}
+prompt: "Fix payment webhook signature validation."
+gold:
+  required: []
+  forbidden: ["backwards compatible"]
+layers: [0]
+l0_queries:
+  - {query: now}

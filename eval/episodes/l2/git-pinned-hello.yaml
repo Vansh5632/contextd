@@ -1,0 +1,30 @@
+name: git-pinned-hello
+level: l2
+category: long-term-recall
+repo:
+  kind: git
+  path: https://github.com/octocat/Hello-World.git
+  commit: 7fd1a60b01f91b314f59955a4e4d4e80d8edf11d
+history:
+  - session: prior
+    offset: -2d
+    events:
+      - source: note
+        payload:
+          kind: finding
+          text: Hello-World README is not the source of the Mutex wrap
+      - source: note
+        payload:
+          kind: decision
+          text: keep the counter local even on this pinned checkout
+prompt: "Have we seen this rate-limit failure on the pinned checkout?"
+gold:
+  required:
+    - Mutex wrap
+    - keep the counter local
+  decisions:
+    - {text: keep the counter local even on this pinned checkout}
+layers: [0, 1]
+l0_queries:
+  - {query: search, text: Mutex wrap, limit: 10}
+  - {query: search, text: keep the counter local, limit: 10}
