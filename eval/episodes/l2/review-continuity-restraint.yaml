@@ -1,0 +1,24 @@
+name: review-continuity-restraint
+level: l2
+category: review-continuity
+restraint: true
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: pr
+    offset: -2h
+    events:
+      - source: note
+        payload: {kind: finding, text: "reviewer asked to avoid RwLock and use Mutex"}
+  - session: current
+    offset: -5s
+    intent: fix payment webhook signature validation
+    events:
+      - source: file_system
+        payload: {path: src/payments/webhook.rs, action: Modify}
+prompt: "Fix payment webhook signature validation."
+gold:
+  required: []
+  forbidden: ["avoid RwLock", "use Mutex"]
+layers: [0]
+l0_queries:
+  - {query: now}

@@ -1,0 +1,22 @@
+name: prior-investigation-timeout
+level: l2
+category: prior-investigation
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: tried
+    offset: -1d
+    events:
+      - source: note
+        payload: {kind: ruled_out, text: increasing timeout did not solve it}
+      - source: note
+        payload: {kind: ruled_out, text: changing retry count did not solve it}
+      - source: note
+        payload: {kind: finding, text: serializing the test hides the bug}
+prompt: "Keep working on the flaky login issue."
+gold:
+  required: ["timeout did not solve", "retry count"]
+  frontier:
+    ruled_out: ["increasing timeout", "changing retry count"]
+layers: [0]
+l0_queries:
+  - {query: search, text: timeout did not solve, limit: 20}

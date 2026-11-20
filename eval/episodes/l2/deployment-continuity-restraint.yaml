@@ -1,0 +1,24 @@
+name: deployment-continuity-restraint
+level: l2
+category: deployment-continuity
+restraint: true
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: rollout
+    offset: -2h
+    events:
+      - source: note
+        payload: {kind: finding, text: canary is at 10 percent on us-east-1}
+  - session: current
+    offset: -5s
+    intent: fix payment webhook signature validation
+    events:
+      - source: file_system
+        payload: {path: src/payments/webhook.rs, action: Modify}
+prompt: "Fix payment webhook signature validation."
+gold:
+  required: []
+  forbidden: ["canary is at 10 percent"]
+layers: [0]
+l0_queries:
+  - {query: now}

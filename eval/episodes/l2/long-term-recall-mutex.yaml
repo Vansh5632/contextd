@@ -1,0 +1,17 @@
+name: long-term-recall-mutex
+level: l2
+category: long-term-recall
+requires_embeddings: true
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: old
+    offset: -2w
+    events:
+      - source: note
+        payload: {kind: finding, text: wrap the counter in a Mutex}
+prompt: "This flaky rate-limit test is back. Have we seen it?"
+gold:
+  required: ["Mutex"]
+layers: [0]
+l0_queries:
+  - {query: recall, text: flaky rate limit counter, limit: 10}

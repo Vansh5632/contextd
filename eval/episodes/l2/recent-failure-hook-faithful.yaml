@@ -1,0 +1,16 @@
+name: recent-failure-hook-faithful
+level: l2
+category: recent-failure
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: failure
+    offset: -20s
+    events:
+      - source: shell
+        payload: {command: cargo test login_rate_limit, exit_code: 101, cwd: /tmp/auth-service}
+prompt: "That test is failing again."
+gold:
+  required: ["exited 101"]
+layers: [0]
+l0_queries:
+  - {query: now}

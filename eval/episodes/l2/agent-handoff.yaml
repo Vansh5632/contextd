@@ -1,0 +1,20 @@
+name: agent-handoff
+level: l2
+category: agent-handoff
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: agent-a
+    offset: -3h
+    intent: investigate concurrent rate limiter
+    events:
+      - source: note
+        payload: {kind: next_step, text: inspect concurrent decrement path}
+      - source: note
+        payload: {kind: hypothesis, text: AtomicUsize decrement race}
+prompt: "Take over from where the previous agent stopped."
+gold:
+  required: ["inspect concurrent decrement", "AtomicUsize"]
+  expected_tools: [context_now]
+layers: [0, 1]
+l0_queries:
+  - {query: search, text: concurrent decrement, limit: 10}

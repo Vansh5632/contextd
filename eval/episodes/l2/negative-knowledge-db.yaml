@@ -1,0 +1,21 @@
+name: negative-knowledge-db
+level: l2
+category: negative-knowledge
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: a
+    offset: -1d
+    events:
+      - source: note
+        payload: {kind: ruled_out, text: The test failure is not caused by timeout}
+      - source: note
+        payload: {kind: ruled_out, text: "The bug isn't in login.rs"}
+prompt: "The flaky auth issue is happening again. Investigate."
+gold:
+  required: ["not caused by timeout", "isn't in login.rs"]
+  frontier:
+    ruled_out: ["timeout", "login.rs"]
+layers: [0]
+l0_queries:
+  - {query: search, text: not caused by timeout, limit: 20}
+  - {query: search, text: "isn't in login.rs", limit: 10}

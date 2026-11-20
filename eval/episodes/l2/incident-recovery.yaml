@@ -1,0 +1,18 @@
+name: incident-recovery
+level: l2
+category: incident-recovery
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: sev
+    offset: -6h
+    events:
+      - source: note
+        payload: {kind: finding, text: "prod 429 spike started after deploy abc123"}
+      - source: note
+        payload: {kind: next_step, text: roll back deploy abc123 if error budget burns}
+prompt: "Why did we decide not to use Redis?"
+gold:
+  required: ["deploy abc123"]
+layers: [0]
+l0_queries:
+  - {query: search, text: deploy abc123, limit: 10}

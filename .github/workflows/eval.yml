@@ -1,0 +1,49 @@
+name: Eval L0
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+concurrency:
+  group: eval-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  layer0:
+    name: Layer 0 retrieval
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install eval dependencies
+        run: pip install -r eval/requirements.txt
+
+      - name: Harness unit tests
+        run: python3 -m unittest eval.harness.test_harness
+
+      - name: Build contextd
+        run: cargo build -p contextd
+
+      # Episode misses are a measurement of the daemon. A harness crash still fails above.
+      - name: Run layer 0
+        run: python3 -m eval.harness --layer 0 --ci
+        continue-on-error: true

@@ -1,0 +1,16 @@
+name: review-continuity-nits
+level: l2
+category: review-continuity
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: nits
+    offset: -2h
+    events:
+      - source: note
+        payload: {kind: next_step, text: rename remaining to tokens_left per review}
+prompt: "Pick up where we left off."
+gold:
+  required: ["tokens_left"]
+layers: [0]
+l0_queries:
+  - {query: search, text: tokens_left, limit: 10}
