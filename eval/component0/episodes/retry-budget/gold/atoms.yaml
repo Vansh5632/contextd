@@ -43,3 +43,9 @@ atoms:
     claim: A shared counter in another service might be involved.
     match:
       - '\bmight be involved\b'
+
+  - id: stale_not_counted
+    role: stale
+    claim: The first send is not counted, so retry_count stays at zero until a failure.
+    match:
+      - '\bnot counted\b'

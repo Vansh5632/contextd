@@ -1,0 +1,10 @@
+diff --git a/host.py b/host.py
+index 9f87f26..f6e14b4 100644
+--- a/host.py
++++ b/host.py
+@@ -1,4 +1,4 @@
+ def format_host(host, port, default_port):
+-    if port <= default_port:
++    if port == default_port:
+         return host
+     return f"{host}:{port}"

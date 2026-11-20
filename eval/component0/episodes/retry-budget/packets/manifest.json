@@ -1,0 +1,84 @@
+{
+  "episode": "retry-budget",
+  "history": {
+    "file": "history/history.jsonl",
+    "session_tokens": {
+      "A": 306,
+      "B": 31,
+      "C": 18
+    },
+    "sha256": "dc06b524fb6ae3b7364ce99519dc451e12120f0e7857765de707a84a8ceabcf8",
+    "units": 16
+  },
+  "packets": {
+    "contextd-new": {
+      "file": "packets/contextd_new.txt",
+      "sha256": "795b776886c4a7fe20fb2a4568df494b214f36dfa0f9ae9f3605fc6e656f9474",
+      "tokens": 246
+    },
+    "none": {
+      "file": null,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tokens": 0
+    },
+    "oracle": {
+      "file": "packets/oracle.txt",
+      "sha256": "52a517d9ab985fafa519b1f28ea3e50bdbba31d0aa6b8f762ef911208627c9aa",
+      "tokens": 117
+    },
+    "raw": {
+      "dropped_units": [],
+      "file": "packets/raw.txt",
+      "kept_units": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "sha256": "f4e82ddd746d84de21a891ab5a5a5dc3c3ebb5113ed00df9e6f2d843966022be",
+      "tokens": 372
+    },
+    "stale-only": {
+      "file": "packets/stale_only.txt",
+      "sha256": "1afc97b78bef53e1c96ab1861be3852e8fa53e50e1c950355d1971425ac797dc",
+      "tokens": 20
+    },
+    "summary": {
+      "file": "packets/summary.txt",
+      "sha256": "06705d16632690baedccc96e3c70dc45e5d909a74acb8f3da160e00005e39cc2",
+      "tokens": 59
+    }
+  },
+  "prompts": {
+    "contextd-new": {
+      "sha256": "4daaa045e6c2c579ea6dc37ecb802976c1b0915be42256c6bf293f9956c30a78",
+      "tokens": 262
+    },
+    "none": {
+      "sha256": "cbda080ee4a0a36d38b089ccb344a00a0f3c9a132c8839c4b2210b9aa524213d",
+      "tokens": 8
+    },
+    "oracle": {
+      "sha256": "c4d1962db5efe6f3bf844dbb2a68aa8f9fd16d6fe9741eb5b714694c4eaa441a",
+      "tokens": 133
+    },
+    "summary": {
+      "sha256": "b3285569880fd2c1a92fceae3defacbfffdebdedda8c1b1757688bc2adc8c232",
+      "tokens": 75
+    }
+  },
+  "raw_budget_tokens": 8192,
+  "tokenizer": "o200k_base"
+}

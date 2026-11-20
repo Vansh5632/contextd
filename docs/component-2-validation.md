@@ -1,5 +1,7 @@
 # Component 2 validation
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Measured on 2 November 2026. The numbers in this note are the result. The generated briefing and the agent traces stay on the machine that ran them.
 
 This note answers the question Component 1 left open:

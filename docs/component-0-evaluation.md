@@ -1,5 +1,7 @@
 # Component 0: How to evaluate context quality
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Research note for contextd. This document answers one question:
 
 > Before we build any context-management component, exactly how will we know whether it improved the context given to the agent, and whether that improvement produced meaningful engineering value?

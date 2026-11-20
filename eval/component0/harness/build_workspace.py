@@ -113,13 +113,31 @@ def normalize_git_dir(repo: Path) -> None:
     git(repo, "read-tree", "HEAD")
 
 
+def copy_local_tree(src: Path, dest: Path) -> None:
+    if not src.is_dir():
+        raise SystemExit(f"local tree is not a directory: {src}")
+    for path in sorted(src.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts or path.suffix == ".pyc":
+            continue
+        target = dest / path.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, target)
+
+
 def build(pins: Pins) -> dict[str, object]:
-    ensure_mirror(pins)
     repo = pins.workspace_dir
     if repo.exists():
         shutil.rmtree(repo)
     repo.mkdir(parents=True)
-    export_tree(pins, repo)
+    if pins.source == "local":
+        if pins.local_tree is None:
+            raise SystemExit(f"{pins.name} is a local episode with no tree")
+        copy_local_tree(pins.local_tree, repo)
+        upstream = {"url": pins.repo_url, "sha": pins.repo_sha, "tag": pins.repo_tag}
+    else:
+        ensure_mirror(pins)
+        export_tree(pins, repo)
+        upstream = {"url": pins.repo_url, "sha": pins.repo_sha, "tag": pins.repo_tag}
 
     with tempfile.TemporaryDirectory() as empty_template:
         git(repo, "init", "-q", f"--template={empty_template}", "-b", pins.default_branch)
@@ -149,7 +167,7 @@ def build(pins: Pins) -> dict[str, object]:
     )
     manifest: dict[str, object] = {
         "episode": pins.name,
-        "upstream": {"url": pins.repo_url, "sha": pins.repo_sha, "tag": pins.repo_tag},
+        "upstream": upstream,
         "commits": {"import": import_sha, "followup": followup_sha},
         "tar": pins.tar_path.name,
         "tar_sha256": tar_sha,

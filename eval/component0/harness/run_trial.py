@@ -385,14 +385,14 @@ def host_python(args: list[str]) -> subprocess.CompletedProcess[bytes]:
                           capture_output=True, check=False)  # fmt: skip
 
 
-def arms_check() -> None:
-    result = host_python(["harness.arms", "check"])
+def arms_check(episode: str = "limiter-handoff") -> None:
+    result = host_python(["harness.arms", "check", "--episode", episode])
     if result.returncode != 0:
         raise TrialError("arms check failed:\n" + result.stdout.decode(errors="replace"))
 
 
 def build_prompt(pins: Pins, arm: str) -> bytes:
-    arms_check()
+    arms_check(pins.name)
     result = host_python(["harness.arms", "prompt", "--arm", arm, "--episode", pins.name])
     if result.returncode != 0:
         raise TrialError("arms prompt failed: " + result.stderr.decode(errors="replace"))
@@ -574,12 +574,18 @@ def score_tests(pins: Pins, diff_path: Path, logs: Path) -> dict[str, Any]:
                 hidden[f"{src.name}::{key.rsplit('::', 1)[-1]}"] = (
                     "pass" if state == "passed" else "fail"
                 )
-        unasync_code, _ = box.docker("unasync-check", ["python", "scripts/unasync.py", "--check"])
+        if "unasync" in pins.checks:
+            unasync_code, _ = box.docker(
+                "unasync-check", ["python", "scripts/unasync.py", "--check"]
+            )
+            unasync_state = "pass" if unasync_code == 0 else "fail"
+        else:
+            unasync_state = "pass"
         result = {
             "visible": "pass" if visible_code == 0 else "fail",
             "hidden": hidden,
             "suite": "pass" if suite_code == 0 else "fail",
-            "unasync_check": "pass" if unasync_code == 0 else "fail",
+            "unasync_check": unasync_state,
             "apply": "pass",
         }
         validate_final_tests(result)

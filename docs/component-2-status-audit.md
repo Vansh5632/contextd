@@ -1,5 +1,7 @@
 # Component 2 status
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Updated 3 November 2026. The numbers and the rerun command are in `docs/component-2-validation.md` section 7. The mechanism is in `docs/component-2-design.md` under "Live handoff".
 
 Live tool results enter through `observe`, not the shell hook. `run_handoff` quotes them at startup, after a note, and before `context_now`, and writes claim events. A restart folds those events. An unsupported conclusion is skipped. A retract supersedes only the claim it quotes.

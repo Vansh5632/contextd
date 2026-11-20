@@ -1,5 +1,7 @@
 # Component 1 remaining work
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Audit of the working tree on 30 October 2026, after the validation in `docs/component-1-validation.md`.
 
 The tree is `bf1826c` plus the uncommitted Component 1 changes. No source file under `bin/contextd`, `crates/memory`, `crates/broker`, `crates/core`, `crates/store`, `crates/pipeline`, or `crates/sources` is newer than `target/debug/contextd` (built 2026-10-30 19:36:47 +0530, the binary the validation measured). This note reads that code and the validation artifacts. It does not change the projector, the renderer, or the selection rule.

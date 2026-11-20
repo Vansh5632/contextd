@@ -1,0 +1,3 @@
+The visible test tests/test_retry.py fails. It reports retry_count 2 where it expects 1.
+
+Some of deliver in courier.py has been read. The pool issue from another service was not what this session was changing. A reasonable next step is to inspect deliver and rerun the test.

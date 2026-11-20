@@ -1,5 +1,7 @@
 # Component 2 research
 
+> Historical research/report: statements and measurements below describe the dated snapshot, not necessarily the current implementation. See [current architecture](architecture.md), [status](status.md), and the [documentation index](README.md).
+
 Research note for the gap Component 1 left open. Written 2 November 2026 from the limiter-handoff episode, the Component 0 and Component 1 measurements, and the papers below.
 
 This note does not change the projector. The design that follows it is `docs/component-2-design.md`. The measurements are `docs/component-2-validation.md`.

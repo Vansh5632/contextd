@@ -1,0 +1,1 @@
+Retract: The first send is not counted, so retry_count stays at zero until a failure.

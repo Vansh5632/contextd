@@ -1,306 +1,144 @@
-# contextd — step-by-step build walkthrough
+# Build and setup
 
-How the daemon was actually assembled, what each crate is for, and what to build next.
+Current setup guide, checked against the working tree on **10 November 2026**. For the crate map and data flow, use [architecture](architecture.md); for unfinished work, use [status](status.md).
 
-This file describes the *running* code as of September 2026. The four-tier memory system, the pipeline classifiers, and packaging all exist now; where this document once said "designed but not built", it now says where the code lives.
+## Prerequisites
 
----
+- Linux and a native C/linker build toolchain.
+- Rust/Cargo **1.88 or newer**, as declared by the workspace.
+- Git; `nc` (netcat) for installed shell/Git hook delivery. OpenBSD netcat is the installer's suggested Linux package.
+- Optional: a systemd user session for background startup; Ollama with a 768-dimensional embedding model for semantic search.
 
-## Mental model
+SQLite is bundled through `rusqlite`; a separate SQLite server is not needed. The normal release build is a native executable, not a verified static binary.
 
-contextd is a local background process. Sensors notice activity on your machine, convert it into one shared JSON type (`RawEvent`), push it onto an in-process broadcast bus, score it with if/else rules, and write it to SQLite. Everything expensive — embedding, classification, summarizing, graph building — happens afterwards in a bounded worker. An agent then asks the same Unix socket for a briefing assembled from every tier.
+## Build without installing
 
-```
-sensors  →  Tokio broadcast bus  →  heuristics score  ┬→  Tier 0 working set (RAM)
-                                                      └→  Tier 1 SQLite events.db
-                                                              │
-                                          bounded enrichment queue (off hot path)
-                                          analyze → decide → embed
-                                                              │
-                                     ┌────────────────────────┼──────────────────┐
-                                     ↓                        ↓                  ↓
-                              Tier 2 graph            vec_events (768-d)   Tier 3 zstd archive
-                            (petgraph + tables)                            (via the pruner)
-
-agent  →  contextd mcp (stdio JSON-RPC)  →  Unix socket  →  broker: rank all four tiers,
-                                                            fit a token budget, reply
-```
-
-The load-bearing rule throughout: **watching never depends on a model being online.** Ollama being down costs you semantic search and nothing else.
-
----
-
-## Crate jobs (what each piece is for)
-
-| Crate | Job | What it does today |
-|---|---|---|
-| `crates/core` | Shared language | `RawEvent`, `ProcessedEvent`, `Intent`, `ContextRequest`, `AppConfig`, errors. Every other crate depends on this. |
-| `crates/sources` | Sensors | Produce `RawEvent`s: Unix socket, filesystem (noise-filtered), git hooks, process poller, manifest chaining. Also owns hook installation. |
-| `crates/pipeline` | Classification and summarizing | `heuristics` scores on the hot path; `classify`, `content`, `memory`, and `decision` run behind the queue. |
-| `crates/store` | Tiers 1 and 3 | `Store` (one writer, a read pool, WAL) over `events` + `vec_events` (768-d), plus the zstd `archive`. |
-| `crates/memory` | Tiers 0 and 2 | In-RAM `WorkingSet`, and a `petgraph` knowledge graph persisted to `graph_nodes` / `graph_edges`. |
-| `crates/ai` | Local LLM client | Ollama health + `/api/embed`. Configurable model; every call is optional. |
-| `crates/background` | Off-hot-path work | The bounded enrichment queue, and a pruner that archives rather than deletes. |
-| `bin/contextd` | Glue and CLI | Starts tasks, owns the bus, is the only DB writer. Subcommands: `run`, `mcp`, `intent`, `status`, `install`, `uninstall`. |
-| `crates/broker` | Agent-facing snapshot | Ranks all four tiers by recency + importance + similarity + graph proximity, then fits a token budget. |
-| `crates/mcp` | Agent-facing protocol | `rmcp` stdio server: `context_now`, `search_context`, `recall_similar`, `set_intent`, and a `context://` resource. |
-
----
-
-## Build sequence (what we actually shipped)
-
-Each step below is one git-era. Later steps *use* earlier ones; they do not replace them.
-
-### Step 0 — Workspace scaffold (Mar 29 – Apr 3)
-
-**Files:** `Cargo.toml`, `CONTRIBUTING.md`, `.github/workflows/ci.yml`
-
-Empty Rust workspace + CI (fmt, clippy, test). No daemon. This locked “single static binary, local only.”
-
-### Step 1 — Shared event language (Apr 3, #1)
-
-**File:** `crates/core/src/event.rs`
-
-`RawEvent` is the contract:
-
-- `id` — string (ULID in producers)
-- `timestamp_ms`
-- `source` — `shell` \| `file_system` \| `git` \| `editor` \| `proc` \| `manifest`
-- `payload` — arbitrary JSON
-
-`editor` is in the enum so later code can use it. Nothing produces editor events yet.
-
-### Step 2 — Config and errors (Apr 5, #3)
-
-**Files:** `crates/core/src/config.rs`, `crates/core/src/error.rs`, `crates/core/src/test_utils.rs`
-
-Hardcoded defaults until a TOML file exists:
-
-- DB: `/tmp/contextd/events.db`
-- Socket: `/tmp/contextd/contextd.sock`
-- `max_memory_mb: 500` — stored, never enforced
-
-### Step 3 — Daemon + shell socket (Apr 11, #7)
-
-**Files:** `bin/contextd/src/main.rs`, `crates/sources/src/shell.rs`
-
-This is when it becomes a process.
-
-1. Tokio runtime + tracing
-2. Create `/tmp/contextd/`
-3. Open SQLite
-4. `broadcast::channel(100)` — the event bus
-5. Spawn Unix listener on the socket
-6. Main task: `recv` → persist
-
-The socket is **ingest only**. Clients send newline-delimited JSON `RawEvent`s. There is no reply, no query.
-
-Git hooks later reuse this same socket (`nc -U`). There is no second listener.
-
-### Step 4 — Filesystem watcher (Apr 11, #8)
-
-**File:** `crates/sources/src/filesystem.rs`
-
-`notify` / inotify on the process cwd. Create / modify / remove become `FileSystem` events `{action, path}`. Paths under `target/` and `.git/` are dropped.
-
-No debounce: a burst of saves is a burst of bus events.
-
-### Step 5 — Process poller (Apr 12, #9)
-
-**File:** `crates/sources/src/proc_poller.rs`
-
-Every 1s, `sysinfo` looks at PIDs whose name contains `cargo`, `node`, `npm`, `python`, `docker`, or `rustc`. Emits `process_start` (cmdline) and `process_stop`.
-
-This is how “I just started a build” gets into context without a shell hook.
-
-### Step 6 — Heuristics + persist scores (Apr 22 #10, May 6 #11)
-
-**Files:** `crates/pipeline/src/heuristics.rs`, `crates/store/src/db.rs`
-
-The live pipeline is this one stage:
-
-```
-RawEvent  →  process_event()  →  ProcessedEvent { raw, score }  →  INSERT events
-```
-
-| Signal | Score |
-|---|---|
-| Manifest (`Cargo.toml` / `package.json` derived event) | 0.95 |
-| `cargo build` / `npm run` (shell or process start) | 0.9 |
-| Git `commit` / `checkout` | 0.8 |
-| `Cargo.toml` / `package.json` filesystem save | 0.8 |
-| Other process starts | 0.7 |
-| Default / editor fallback | 0.5 |
-| `ls` / `cd` | 0.1 |
-
-No Phi-3 classifier. No summarization. Payload is stored verbatim.
-
-### Step 7 — Git post-commit hook (May 15, #12)
-
-**File:** `crates/sources/src/git.rs`
-
-On boot: walk up from cwd to `.git`, install a managed `post-commit` hook (existing hook backed up). The hook sends `{action: commit, hash, message}` through `nc -U` to the socket.
-
-Only post-commit. No checkout/push producer (the scorer already knows those action names).
-
-### Step 8 — Manifest watcher (May 16, #14)
-
-**File:** `crates/sources/src/manifest.rs`
-
-Listens on the **same bus**. If a filesystem event path is `Cargo.toml` or `package.json` (not under `node_modules`), it injects a second event: `source=manifest`, `action=dependencies_updated`.
-
-Filename match only — it does not parse TOML/JSON or diff dependencies.
-
-This is the first **derived** source: one real OS event becomes two stored events.
-
-### Step 9 — Ollama client (May 16–17, #13 #15)
-
-**File:** `crates/ai/src/ollama.rs`
-
-- `GET /api/tags` — health, 2s timeout
-- `POST /api/embeddings` — `nomic-embed-text`, 768 floats
-
-At boot the daemon logs “AI enabled” or “heuristics-only”. The health check is log-only: the client is kept either way, and every call fails open.
-
-Note: `/api/embeddings` is the legacy Ollama endpoint, superseded by `/api/embed`.
-
-### Step 10 — Vector store (May 21, #16) — `develop`
-
-**File:** `crates/store/src/vector.rs`
-
-Registers `sqlite-vec`, creates `vec_events(event_id, embedding float[768])`, implements insert + cosine KNN.
-
-### Step 11 — Background pruner (May 21, PR #18)
-
-**File:** `crates/background/src/pruner.rs`
-
-Wakes every hour. Deletes rows with `timestamp_ms` older than 7 days **and** `score < 0.5`, then orphan embeddings.
-
-Not an archive. `zstd` is a workspace dependency with no call sites. High-score commits are kept.
-
-### Step 12 — Embed on ingest
-
-**File:** `bin/contextd/src/main.rs`
-
-After a successful `insert_event`, the daemon spawns a detached task that embeds the payload and calls `insert_embedding`. If Ollama is down the warn is logged and the row simply has no vector.
-
-This is what finally gives `vec_events` a production writer. It is also unbounded: one `tokio::spawn` per event, with no queue and no backpressure.
-
-### Step 13 — Socket query protocol
-
-**File:** `crates/sources/src/shell.rs`
-
-The socket stops being ingest-only. `parse_inbound_line` classifies each line:
-
-- `{"query":"now"}` (optionally with `"text"`) → `InboundLine::Query`
-- anything else that deserializes as `RawEvent` → `InboundLine::Event`
-
-A query gets a `oneshot` channel wrapped in a `ContextQuery`, sent to the daemon over an `mpsc`. The daemon answers with a serialized snapshot on the same connection. Ingest stays fire-and-forget.
-
-### Step 14 — Broker snapshot
-
-**File:** `crates/broker/src/snapshot.rs`
-
-`snapshot_now` returns `{ recent_activity, relevant_history }`. Recency is the newest 10 events; relevance is up to 5 KNN matches for the query embedding, skipping anything already in the recent window. If the query text is empty it embeds the newest payload instead.
-
-Fail-open at every step: no Ollama, or a failed embed, or a failed KNN, still yields the recency half.
-
-### Step 15 — MCP stdio server
-
-**Files:** `crates/mcp/src/{stdio,rpc,daemon}.rs`, `bin/contextd/src/main.rs`
-
-`contextd --mcp` does **not** start the daemon. It is a short-lived stdio child that Cursor/Claude launch, which forwards to the already-running daemon over the Unix socket.
-
-Hand-rolled JSON-RPC 2.0, newline-delimited, protocol `2024-11-05`. Implements `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. One tool: `context_now`. A daemon that is not running comes back as an MCP tool error (`isError: true`), not a JSON-RPC error, which is the correct distinction.
-
-Logging goes to stderr so stdout stays a clean protocol pipe.
-
----
-
-## Follow one event (cargo build)
-
-1. **proc_poller** sees a new `cargo` PID → `RawEvent { source: proc, payload: { action: process_start, command: "… cargo build" } }`
-2. **broadcast bus** delivers it to the main loop (manifest watcher ignores it — not a filesystem event)
-3. **heuristics** scores **0.9**
-4. **store** inserts into `events`
-5. **embedder** spawns, and if Ollama answers, writes 768 floats into `vec_events`
-6. **pruner** — keeps it (score ≥ 0.5)
-7. later, an agent calls `context_now` and this event comes back in `recent_activity`
-
-A `Cargo.toml` save is different: filesystem emits one event (score 0.8) **and** the manifest watcher emits a second (score 0.95). Both are stored.
-
-A git commit never touches the poller: the hook writes JSON to the Unix socket; the shell listener publishes it; score 0.8.
-
----
-
-## What is designed but not built
-
-- Use-case classifier, content processor, memory-type classifier, decision engine — the pipeline is still one if/else scorer
-- Tier 0 in-RAM working set
-- Tier 2 knowledge graph (`petgraph` unused)
-- Tier 3 compressed archive (`zstd` unused) — the pruner hard-deletes
-- Shell hook installer (`.bashrc` / `.zshrc`)
-- Git `post-checkout` / `pre-push` producers (the scorer already knows `checkout`)
-- systemd unit, TOML config file (`toml` unused), one-command install
-- No indices on `events`, so every recency query is a full scan
-- A single `Arc<Mutex<Connection>>` shared by the writer, the pruner, and every query
-
-`EventSource::Editor` is unused and stays that way: there is no VS Code extension in scope.
-
----
-
-## What is still open
-
-The loop the project set out to build now works end to end. What remains is judgement, not plumbing:
-
-- **The classifiers are rules, not models.** `crates/pipeline` decides use case and memory type with heuristics. The plan always allowed a small local instruct model as an async upgrade behind the same interface; nothing calls one yet.
-- **Tier 3 is written but rarely read.** The archive is populated and can be read back, but the broker only surfaces a hint that it exists rather than searching inside it.
-- **Multi-repo.** One daemon watches one root. Watching several projects at once means either several daemons or a real per-repo scope.
-
----
-
-## How to verify locally
-
-Paths below assume the defaults; `contextd status` prints the real ones.
+From the repository root:
 
 ```bash
-cargo test --workspace
-contextd install       # shell hook, git hooks, systemd unit, config file
-contextd run           # or: systemctl --user enable --now contextd
+cargo build --locked
+./target/debug/contextd help
+./target/debug/contextd status
 ```
 
-In another terminal, check what it can see:
+Choose the project to watch before starting the daemon:
+
+```bash
+cd /path/to/project
+/path/to/contextd/target/debug/contextd run
+```
+
+`watch_root` defaults to the startup directory. The foreground daemon does not install shell-profile hooks, but it does install managed Git hooks if the watched root is inside a repository. Use a disposable project for experiments. Stop the foreground process with Ctrl-C.
+
+Use the same absolute binary path from another terminal for commands if you have not installed it.
+
+## Install integrations
+
+From the checkout:
+
+```bash
+./install.sh
+```
+
+The script:
+
+1. Builds with `cargo build --release --locked`.
+2. Installs `contextd` to `${PREFIX:-$HOME/.local}/bin`.
+3. Runs `contextd install` to create config (if absent), add a managed shell block, write a systemd user unit, and install Git hooks in the current repository when present.
+4. Attempts `systemctl --user daemon-reload` and `systemctl --user enable --now contextd`; failure to start the user service is reported and a foreground run is still available.
+
+Ensure the install directory is on PATH. Open a new terminal to load the hook, or source the shell profile named by the installer. Bash, Zsh, and Fish are supported by the generated snippets. Hooks need `nc`; missing `nc` means no hook delivery.
+
+Installation inside the contextd checkout makes that checkout the default service working directory. To watch another project, set an absolute `watch_root` in the config. After changing it, restart the service. If you run `contextd install` again, it also refreshes the unit working directory and installs hooks in the current repository.
+
+## Configuration and paths
 
 ```bash
 contextd status
-contextd intent "fixing the login bug"
 ```
 
-Send an event by hand, the way a hook does:
+This prints the effective config, database, and socket paths and probes the daemon. Defaults:
+
+| Setting | Default |
+|---|---|
+| Config file | `$XDG_CONFIG_HOME/contextd/config.toml`, otherwise `~/.config/contextd/config.toml` |
+| Database | `$XDG_DATA_HOME/contextd/events.db`, otherwise `~/.local/share/contextd/events.db` |
+| Socket | `$XDG_RUNTIME_DIR/contextd/contextd.sock`, otherwise the contextd data directory |
+| `watch_root` | Daemon startup directory |
+| `ollama_url` | `http://localhost:11434` |
+| `embedding_model` | `nomic-embed-text` |
+| `max_memory_mb` | `500`, **not enforced** |
+
+Every TOML field is optional. A minimal example:
+
+```toml
+watch_root = "/home/you/projects/thing"
+ollama_url = "http://localhost:11434"
+embedding_model = "nomic-embed-text"
+```
+
+`db_path` and `socket_path` also accept absolute paths. Relative `watch_root` is resolved against the daemon's working directory. `contextd install` preserves an existing config file. Currently the CLI logs malformed/unreadable config and falls back to defaults; check `status` and stderr when a setting appears ignored.
+
+For optional semantic search, run your Ollama service and pull the default model:
 
 ```bash
-printf '%s\n' '{"source":"shell","payload":{"command":"cargo build","exit_code":0}}' \
-  | nc -U -N "$(contextd status | awk '/^socket/{print $2}')"
+ollama pull nomic-embed-text
 ```
 
-Ask for a briefing the way an agent does:
+The client uses `/api/embed` and requires exactly 768 dimensions. `CONTEXTD_EMBEDDING_MODEL` overrides the model when supplied in the daemon environment. Changing the embedding model does not migrate existing vectors; do not assume vectors from different models are comparable. Change the endpoint through `ollama_url`: `OLLAMA_HOST` does not override the URL passed by the daemon's config loader.
+
+Without Ollama, ingestion, rule-based summaries, extraction, and current briefings continue; search and recall fall back to literal payload matching. A configured remote Ollama endpoint receives embedding input.
+
+## Background service
+
+After `contextd install`:
 
 ```bash
-printf '%s\n' '{"query":"now"}' | nc -U -N "$(contextd status | awk '/^socket/{print $2}')"
+systemctl --user daemon-reload
+systemctl --user enable --now contextd
+systemctl --user status contextd
+journalctl --user -u contextd -n 50 --no-pager
 ```
 
-Note the `-N`. Without it most netcats never half-close the socket, so `nc` waits
-for the daemon while the daemon waits for another line. The hooks in
-`crates/sources/src/emit.rs` handle this themselves; when typing by hand you have
-to remember it.
-
-Or drive the MCP server directly:
+After editing configuration:
 
 ```bash
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"context_now","arguments":{}}}' \
-  | contextd mcp
+systemctl --user restart contextd
+contextd status
 ```
+
+Stop an existing service before starting a foreground daemon against its database/socket. Run one daemon per database/socket pair. Starting another daemon against the same socket can replace its socket file; it is not an instance-management command.
+
+## Smoke check
+
+With the daemon running and the installed binary on PATH:
+
+```bash
+contextd intent "investigate a failing check"
+contextd claim constraint "keep the public API unchanged"
+contextd observe '{"kind":"tool","session":"smoke","command":"example-check","cwd":"/tmp/contextd-smoke","exit_code":1,"output":"example check failed"}'
+contextd handoff
+contextd status
+```
+
+These commands record illustrative activity; they do not execute `example-check`. Use a disposable configuration if you do not want synthetic activity in your real context. To inspect the JSON briefing, use the socket example in [connecting agents](connecting-agents.md#direct-socket-access), or call MCP `context_now` from your client.
+
+The observation response contains `stored` and `event_id`. Handoff returns `accepted`, `rejected`, and `skipped` lists. A raw note is not guaranteed to yield a claim. For a real grounded conclusion, follow the `observe` example in [connecting agents](connecting-agents.md#record-tool-output-for-handoffs).
+
+## Uninstall
+
+First stop and disable the user service, then remove the managed integrations:
+
+```bash
+systemctl --user disable --now contextd
+contextd uninstall
+systemctl --user daemon-reload
+```
+
+If you never installed a systemd unit, skip the systemctl commands. `uninstall` removes the managed shell block from the selected profile and deletes the unit file. **It does not stop an already-running daemon or remove Git hooks, the executable, configuration, or recorded data.** Existing terminals may retain loaded hook functions until restarted.
+
+Git hooks may wrap preserved pre-existing hooks; inspect the managed hook and its backup before restoring anything. Keep the database/config unless you explicitly want to discard recorded context. This guide does not prescribe automatic deletion of those files.
+
+## Development checks
+
+Use [TESTING.md](../TESTING.md) for Rust and Python checks. Installing or starting the daemon is not required for unit tests, and live-agent matrices are separate from local verification.

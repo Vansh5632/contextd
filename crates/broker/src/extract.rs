@@ -12,8 +12,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use contextd_core::claim::{
-    ClaimConfidence, ClaimEvent, ClaimKind, ClaimOp, ClaimOrigin, FRONTIER_SUBJECT, Projection,
-    validate, validate_against_projection,
+    Claim, ClaimConfidence, ClaimEvent, ClaimKind, ClaimOp, ClaimOrigin, ClaimStatus,
+    FRONTIER_SUBJECT, Projection, validate, validate_against_projection,
 };
 use contextd_core::event::{EventSource, ProcessedEvent, RawEvent};
 use contextd_core::protocol::ObserveKind;
@@ -32,6 +32,45 @@ const STOP: &[&str] = &[
     "about", "after", "also", "and", "are", "because", "been", "before", "but", "for", "from",
     "have", "into", "only", "that", "than", "the", "their", "them", "then", "this", "with",
     "would",
+];
+
+/// Words that can describe a test or a control-flow fact without being copied
+/// from the tool output. A content word outside this list must appear in the
+/// cited output. This is not an overlap score: one extra word is enough to
+/// drop the clause.
+const INTERPRETIVE: &[&str] = &[
+    "above",
+    "already",
+    "below",
+    "branch",
+    "cause",
+    "count",
+    "counted",
+    "counting",
+    "counts",
+    "expected",
+    "expects",
+    "failed",
+    "fails",
+    "failure",
+    "failures",
+    "first",
+    "increment",
+    "incremented",
+    "increments",
+    "means",
+    "never",
+    "path",
+    "reached",
+    "stay",
+    "stayed",
+    "stays",
+    "test",
+    "tests",
+    "toward",
+    "towards",
+    "until",
+    "where",
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -272,17 +311,15 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
                 );
                 continue;
             }
-            if draft.kind == "reality"
-                && content_overlap(&draft.text, draft.support_text.as_deref().unwrap_or(""))
-                    < MIN_OVERLAP
-            {
-                skip(
-                    &mut report,
-                    &event.id,
-                    "inference is not grounded in the preceding tool output",
-                );
-                continue;
+            if draft.kind == "reality" {
+                let relation =
+                    evidence_relation(&draft.text, draft.support_text.as_deref().unwrap_or(""));
+                if relation != EvidenceRelation::Supported {
+                    skip(&mut report, &event.id, evidence_skip_reason(relation));
+                    continue;
+                }
             }
+            let draft = demote_if_conflict(log, draft, &mut projection, &mut seen, &mut report);
             accept_or_record(
                 log,
                 &draft.candidate(),
@@ -547,8 +584,9 @@ fn admit(
         {
             return Err("support text does not match the cited shell output".into());
         }
-        if content_overlap(text, &output) < MIN_OVERLAP {
-            return Err("inferred reality is not supported by the cited tool output".into());
+        let relation = evidence_relation(text, &output);
+        if relation != EvidenceRelation::Supported {
+            return Err(evidence_skip_reason(relation).into());
         }
     }
     if confidence == ClaimConfidence::Observed {
@@ -674,11 +712,11 @@ fn drafts_for_note(
     }
     if is_source_read(support)
         && let Some(output) = support.map(|event| payload_str(event, "output"))
-        && content_overlap(text, &output) >= MIN_OVERLAP
     {
-        return vec![speech_draft(
-            note, text, task, "reality", "agent", "inferred", "", None, support,
-        )];
+        let drafts = span_drafts(note, text, &output, task, support);
+        if !drafts.is_empty() {
+            return drafts;
+        }
     }
     Vec::new()
 }
@@ -715,57 +753,103 @@ fn natural_drafts(
         .unwrap_or_default();
     let mut drafts = Vec::new();
     for (index, sentence) in sentences(text).into_iter().enumerate() {
-        let Some(kind) = classify_natural(sentence, &output) else {
+        if sentence.trim().ends_with('?') {
             continue;
-        };
-        let suffix = suffix_for(index);
-        let draft = match kind {
-            Natural::Hypothesis => speech_draft(
-                note,
-                sentence,
-                task,
-                "unknown",
-                "agent",
-                "hypothesis",
-                &suffix,
-                None,
-                None,
-            ),
-            Natural::NextAction => speech_draft(
+        }
+        if next_action(sentence) {
+            drafts.push(speech_draft(
                 note,
                 sentence,
                 task,
                 "next_action",
                 "agent",
                 "inferred",
-                &suffix,
+                &suffix_for(index),
                 Some(FRONTIER_SUBJECT.to_string()),
                 None,
-            ),
-            Natural::RuledOut => speech_draft(
+            ));
+            continue;
+        }
+        for (span_index, span) in kept_texts(sentence, &output).into_iter().enumerate() {
+            let Some(kind) = classify_span(&span) else {
+                continue;
+            };
+            let suffix = span_suffix(index, span_index);
+            let draft = match kind {
+                Natural::Hypothesis => speech_draft(
+                    note,
+                    &span,
+                    task,
+                    "unknown",
+                    "agent",
+                    "hypothesis",
+                    &suffix,
+                    None,
+                    None,
+                ),
+                Natural::NextAction => continue,
+                Natural::RuledOut => speech_draft(
+                    note,
+                    &span,
+                    task,
+                    "ruled_out",
+                    "agent",
+                    "inferred",
+                    &suffix,
+                    None,
+                    support.filter(|event| event.source == EventSource::Shell),
+                ),
+                Natural::Reality => speech_draft(
+                    note,
+                    &span,
+                    task,
+                    "reality",
+                    "agent",
+                    "inferred",
+                    &suffix,
+                    None,
+                    support.filter(|event| event.source == EventSource::Shell),
+                ),
+            };
+            drafts.push(draft);
+        }
+    }
+    drafts
+}
+
+fn span_drafts(
+    note: &RawEvent,
+    text: &str,
+    output: &str,
+    task: &str,
+    support: Option<&RawEvent>,
+) -> Vec<Draft> {
+    let mut drafts = Vec::new();
+    for (index, sentence) in sentences(text).into_iter().enumerate() {
+        for (span_index, span) in kept_texts(sentence, output).into_iter().enumerate() {
+            let Some(kind) = classify_span(&span) else {
+                continue;
+            };
+            if matches!(kind, Natural::Hypothesis | Natural::NextAction) {
+                continue;
+            }
+            let (claim_kind, confidence) = match kind {
+                Natural::RuledOut => ("ruled_out", "inferred"),
+                Natural::Reality => ("reality", "inferred"),
+                Natural::Hypothesis | Natural::NextAction => continue,
+            };
+            drafts.push(speech_draft(
                 note,
-                sentence,
+                &span,
                 task,
-                "ruled_out",
+                claim_kind,
                 "agent",
-                "inferred",
-                &suffix,
+                confidence,
+                &span_suffix(index, span_index),
                 None,
-                support.filter(|event| event.source == EventSource::Shell),
-            ),
-            Natural::Reality => speech_draft(
-                note,
-                sentence,
-                task,
-                "reality",
-                "agent",
-                "inferred",
-                &suffix,
-                None,
-                support.filter(|event| event.source == EventSource::Shell),
-            ),
-        };
-        drafts.push(draft);
+                support,
+            ));
+        }
     }
     drafts
 }
@@ -777,24 +861,14 @@ enum Natural {
     Reality,
 }
 
-fn classify_natural(sentence: &str, support: &str) -> Option<Natural> {
-    if sentence.trim().ends_with('?') {
-        return None;
-    }
-    let lower = sentence.to_lowercase();
-    if has_word(&lower, "might")
-        || has_word(&lower, "maybe")
-        || lower.contains("not sure")
-        || lower.contains("could be")
-    {
+fn classify_span(span: &str) -> Option<Natural> {
+    if hedge(span) {
         return Some(Natural::Hypothesis);
     }
-    if lower.starts_with("i'll") || lower.starts_with("i will") || lower.starts_with("next i'll") {
+    if next_action(span) {
         return Some(Natural::NextAction);
     }
-    if content_overlap(sentence, support) < MIN_OVERLAP {
-        return None;
-    }
+    let lower = span.to_lowercase();
     if lower.contains("not the cause")
         || lower.contains("isn't the cause")
         || lower.contains("is not the cause")
@@ -855,6 +929,27 @@ fn skip_reason(text: &str, support: Option<&RawEvent>) -> String {
         || starts_word(&lower, "idea")
     {
         return "open hypothesis; a later note has to close it before it is current".into();
+    }
+    if let Some(support) = support.filter(|event| event.source == EventSource::Shell) {
+        let output = payload_str(support, "output");
+        let mut contradicted = false;
+        let mut insufficient = false;
+        for sentence in sentences(text) {
+            if sentence.trim().ends_with('?') || hedge(sentence) || next_action(sentence) {
+                continue;
+            }
+            match evidence_relation(sentence, &output) {
+                EvidenceRelation::Contradicted => contradicted = true,
+                EvidenceRelation::Insufficient => insufficient = true,
+                EvidenceRelation::Supported => {}
+            }
+        }
+        if contradicted {
+            return evidence_skip_reason(EvidenceRelation::Contradicted).into();
+        }
+        if insufficient && content_overlap(text, &output) >= MIN_OVERLAP {
+            return evidence_skip_reason(EvidenceRelation::Insufficient).into();
+        }
     }
     if is_source_read(support) {
         return "note follows a file read but is not grounded in that output".into();
@@ -965,6 +1060,15 @@ fn suffix_for(index: usize) -> String {
         String::new()
     } else {
         char::from(b'b' + (index as u8 - 1).min(24)).to_string()
+    }
+}
+
+fn span_suffix(sentence_index: usize, span_index: usize) -> String {
+    let base = suffix_for(sentence_index);
+    if span_index == 0 {
+        base
+    } else {
+        format!("{base}{span_index}")
     }
 }
 
@@ -1221,6 +1325,443 @@ fn starts_phrase(lower: &str, phrase: &str) -> bool {
     starts_word(lower, phrase)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EvidenceRelation {
+    Supported,
+    Contradicted,
+    Insufficient,
+}
+
+fn evidence_skip_reason(relation: EvidenceRelation) -> &'static str {
+    match relation {
+        EvidenceRelation::Contradicted => "conclusion contradicts the cited tool output",
+        EvidenceRelation::Insufficient => "conclusion is not supported by the cited tool output",
+        EvidenceRelation::Supported => "conclusion is supported by the cited tool output",
+    }
+}
+
+fn hedge(sentence: &str) -> bool {
+    let lower = sentence.to_lowercase();
+    has_word(&lower, "might")
+        || has_word(&lower, "maybe")
+        || lower.contains("not sure")
+        || lower.contains("could be")
+}
+
+fn next_action(sentence: &str) -> bool {
+    let lower = sentence.to_lowercase();
+    lower.starts_with("i'll") || lower.starts_with("i will") || lower.starts_with("next i'll")
+}
+
+/// Relation of one sentence to the tool output it cites.
+///
+/// Shared words are only an anchor: every clause has to touch the output, a
+/// denial has to agree with an increment, and "before" / "after" have to agree
+/// with the order of those identifiers. A larger overlap is not a stronger claim.
+fn evidence_relation(sentence: &str, support: &str) -> EvidenceRelation {
+    if support.trim().is_empty() {
+        return EvidenceRelation::Insufficient;
+    }
+    if polarity_contradiction(sentence, support) || order_contradiction(sentence, support) {
+        return EvidenceRelation::Contradicted;
+    }
+    if clause_unanchored(sentence, support)
+        || residue_unsupported(sentence, support)
+        || content_overlap(sentence, support) < MIN_OVERLAP
+    {
+        return EvidenceRelation::Insufficient;
+    }
+    EvidenceRelation::Supported
+}
+
+fn kept_texts(sentence: &str, support: &str) -> Vec<String> {
+    if hedge(sentence)
+        && evidence_clauses(sentence)
+            .iter()
+            .all(|clause| hedge(clause))
+    {
+        return vec![sentence.to_string()];
+    }
+    let clauses = evidence_clauses(sentence);
+    let kept: Vec<String> = clauses
+        .iter()
+        .filter(|clause| keep_clause(clause, sentence, support))
+        .cloned()
+        .collect();
+    if kept.is_empty() {
+        return Vec::new();
+    }
+    let uniform =
+        clauses.iter().all(|clause| hedge(clause)) || clauses.iter().all(|clause| !hedge(clause));
+    if kept.len() == clauses.len() && uniform {
+        vec![sentence.to_string()]
+    } else {
+        kept
+    }
+}
+
+fn keep_clause(clause: &str, sentence: &str, support: &str) -> bool {
+    if hedge(clause) {
+        return true;
+    }
+    if support.trim().is_empty() || clause_contradicted(clause, sentence, support) {
+        return false;
+    }
+    if clause_has_residue(clause, support) || content_overlap(clause, support) < 1 {
+        return false;
+    }
+    content_overlap(sentence, support) >= MIN_OVERLAP
+}
+
+fn clause_contradicted(clause: &str, sentence: &str, support: &str) -> bool {
+    if order_contradiction(clause, support) || polarity_contradiction(clause, support) {
+        return true;
+    }
+    denies_update(clause) && sentence_names_increment(sentence, support)
+}
+
+fn sentence_names_increment(sentence: &str, support: &str) -> bool {
+    increments(support).into_iter().any(|(name, amount)| {
+        amount > 0
+            && (has_word(sentence, &name)
+                || name.to_lowercase().contains("count") && denies_update(sentence))
+    })
+}
+
+fn residue_unsupported(text: &str, support: &str) -> bool {
+    evidence_clauses(text)
+        .iter()
+        .any(|clause| clause_has_residue(clause, support))
+}
+
+fn clause_has_residue(clause: &str, support: &str) -> bool {
+    let support_tokens: BTreeSet<String> = content_tokens(support).collect();
+    content_tokens(clause).any(|token| !support_tokens.contains(&token) && !interpretive(&token))
+}
+
+fn interpretive(token: &str) -> bool {
+    INTERPRETIVE.binary_search(&token).is_ok()
+}
+
+fn polarity_contradiction(sentence: &str, support: &str) -> bool {
+    if !denies_update(sentence) {
+        return false;
+    }
+    increments(support)
+        .into_iter()
+        .any(|(name, amount)| amount > 0 && has_word(sentence, &name))
+}
+
+fn denies_update(sentence: &str) -> bool {
+    let lower = sentence.to_lowercase();
+    [
+        "not counted",
+        "isn't counted",
+        "is not counted",
+        "never counted",
+        "not incremented",
+        "does not increment",
+        "doesn't increment",
+        "stays at zero",
+        "stay at zero",
+        "remains at zero",
+        "at zero",
+        "stays at 0",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase))
+}
+
+fn increments(support: &str) -> Vec<(String, i64)> {
+    let bytes = support.as_bytes();
+    let mut found = Vec::new();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'+' && bytes[index + 1] == b'=' {
+            let mut name_end = index;
+            while name_end > 0 && bytes[name_end - 1].is_ascii_whitespace() {
+                name_end -= 1;
+            }
+            let mut name_start = name_end;
+            while name_start > 0
+                && (bytes[name_start - 1].is_ascii_alphanumeric() || bytes[name_start - 1] == b'_')
+            {
+                name_start -= 1;
+            }
+            let raw = &support[name_start..name_end];
+            let name = raw.rsplit('.').next().unwrap_or(raw);
+            let mut digit_at = index + 2;
+            while digit_at < bytes.len() && bytes[digit_at].is_ascii_whitespace() {
+                digit_at += 1;
+            }
+            let digit_start = digit_at;
+            while digit_at < bytes.len() && bytes[digit_at].is_ascii_digit() {
+                digit_at += 1;
+            }
+            if !name.is_empty() && digit_at > digit_start {
+                let amount = support[digit_start..digit_at].parse::<i64>().unwrap_or(0);
+                found.push((name.to_string(), amount));
+            }
+            index = digit_at;
+            continue;
+        }
+        index += 1;
+    }
+    found
+}
+
+fn order_contradiction(sentence: &str, support: &str) -> bool {
+    let lower = sentence.to_lowercase();
+    let support = support.to_lowercase();
+    for (marker, before) in [(" before ", true), (" after ", false)] {
+        let mut start = 0;
+        while let Some(relative) = lower[start..].find(marker) {
+            let index = start + relative;
+            let left = &sentence[..index];
+            let right = &sentence[index + marker.len()..];
+            if let (Some(earlier), Some(later)) = (
+                anchored_ident(left, &support, true),
+                anchored_ident(right, &support, false),
+            ) {
+                let left_at = support.find(&earlier);
+                let right_at = support.find(&later);
+                if let (Some(left_at), Some(right_at)) = (left_at, right_at) {
+                    let reversed = if before {
+                        left_at > right_at
+                    } else {
+                        left_at < right_at
+                    };
+                    if reversed {
+                        return true;
+                    }
+                }
+            }
+            start = index + marker.len();
+        }
+    }
+    false
+}
+
+fn anchored_ident(text: &str, support: &str, last: bool) -> Option<String> {
+    let idents = ident_tokens(text);
+    let positions: Vec<usize> = if last {
+        (0..idents.len()).rev().collect()
+    } else {
+        (0..idents.len()).collect()
+    };
+    positions.into_iter().find_map(|index| {
+        let ident = &idents[index];
+        support.contains(ident).then(|| ident.clone())
+    })
+}
+
+fn ident_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            current.push(ch.to_ascii_lowercase());
+        } else if !current.is_empty() {
+            push_ident(&mut tokens, &current);
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        push_ident(&mut tokens, &current);
+    }
+    tokens
+}
+
+fn push_ident(tokens: &mut Vec<String>, token: &str) {
+    if token.len() >= 4
+        && token
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic())
+    {
+        tokens.push(token.to_string());
+    }
+}
+
+fn evidence_clauses(sentence: &str) -> Vec<String> {
+    let mut clauses = Vec::new();
+    let lower = sentence.to_lowercase();
+    let mut start = 0;
+    let markers = [" so ", " because ", " means ", " and ", " but "];
+    while start < sentence.len() {
+        let remainder = &lower[start..];
+        let next = markers
+            .iter()
+            .filter_map(|marker| remainder.find(marker).map(|index| (index, marker.len())))
+            .min_by_key(|(index, _)| *index);
+        let (end, marker_len) = next
+            .map(|(index, len)| (start + index, len))
+            .unwrap_or((sentence.len(), 0));
+        let clause = sentence[start..end]
+            .trim()
+            .trim_matches(|ch: char| ch == ',' || ch == ';');
+        if !clause.is_empty() {
+            clauses.push(clause.to_string());
+        }
+        if marker_len == 0 {
+            break;
+        }
+        start = end + marker_len;
+    }
+    clauses
+}
+
+fn clause_unanchored(sentence: &str, support: &str) -> bool {
+    let support_tokens: BTreeSet<String> = content_tokens(support).collect();
+    evidence_clauses(sentence).into_iter().any(|clause| {
+        let clause_tokens: BTreeSet<String> = content_tokens(&clause).collect();
+        !clause_tokens.is_empty() && clause_tokens.is_disjoint(&support_tokens)
+    })
+}
+
+fn stance(text: &str) -> Option<bool> {
+    if denies_update(text) || has_word(text, "zero") {
+        return Some(false);
+    }
+    const AFFIRM: &[&str] = &[
+        "count",
+        "counted",
+        "counts",
+        "increment",
+        "increments",
+        "incremented",
+        "retry",
+    ];
+    if AFFIRM.iter().any(|word| has_word(text, word)) {
+        Some(true)
+    } else {
+        None
+    }
+}
+
+fn polarity_conflict(left: &str, right: &str) -> bool {
+    if content_overlap(left, right) < MIN_OVERLAP {
+        return false;
+    }
+    matches!((stance(left), stance(right)), (Some(affirm), Some(deny)) if affirm != deny)
+}
+
+fn conflicting_current(projection: &Projection, draft: &Draft) -> Vec<Claim> {
+    projection
+        .claims
+        .iter()
+        .filter(|claim| {
+            claim.status == ClaimStatus::Current
+                && claim.origin == ClaimOrigin::Agent
+                && claim.confidence != ClaimConfidence::Observed
+                && claim.kind.as_str() == draft.kind
+                && polarity_conflict(&draft.text, &claim.text)
+        })
+        .cloned()
+        .collect()
+}
+
+fn demote_if_conflict(
+    log: &mut Vec<RawEvent>,
+    mut draft: Draft,
+    projection: &mut Projection,
+    seen: &mut Vec<(String, String)>,
+    report: &mut HandoffReport,
+) -> Draft {
+    let conflicts = conflicting_current(projection, &draft);
+    if conflicts.is_empty() {
+        return draft;
+    }
+    let note_id = draft
+        .evidence_ids
+        .first()
+        .cloned()
+        .unwrap_or_else(|| draft.claim_id.clone());
+    for target in conflicts {
+        demote_claim(
+            log,
+            &target,
+            &note_id,
+            &draft.task_subject,
+            projection,
+            seen,
+            report,
+        );
+    }
+    draft.kind = "unknown".into();
+    draft.confidence = "hypothesis".into();
+    draft.subject = None;
+    draft.support_text = None;
+    draft.evidence_ids.truncate(1);
+    draft
+}
+
+fn demote_claim(
+    log: &mut Vec<RawEvent>,
+    target: &Claim,
+    note_id: &str,
+    task_subject: &str,
+    projection: &mut Projection,
+    seen: &mut Vec<(String, String)>,
+    report: &mut HandoffReport,
+) {
+    let Some(source) = target
+        .evidence_ids
+        .first()
+        .and_then(|id| event_by_id(log, id))
+        .filter(|event| event.source == EventSource::Note)
+    else {
+        return;
+    };
+    let source_text = payload_str(source, "text");
+    let supersede = ClaimEvent {
+        op: ClaimOp::Supersede,
+        claim_id: format!("conflict_{note_id}_{}", target.id),
+        task_id: target.task_id.clone(),
+        kind: None,
+        subject: None,
+        text: None,
+        confidence: None,
+        origin: ClaimOrigin::Agent,
+        outcome: None,
+        artifact_refs: Vec::new(),
+        evidence_ids: vec![note_id.to_string()],
+        supersedes: Some(target.id.clone()),
+    };
+    if validate(ClaimOrigin::Agent, &supersede)
+        .and_then(|_| validate_against_projection(ClaimOrigin::Agent, &supersede, projection))
+        .is_err()
+    {
+        return;
+    }
+    push_event(
+        log,
+        supersede,
+        format!("c2_conflict_{note_id}_{}", target.id),
+    );
+    *projection = fold(log);
+    report.accepted.push(json!({
+        "claim_id": format!("conflict_{}", target.id),
+        "kind": "conflict",
+        "text": target.text,
+        "demoted_to": "hypothesis",
+        "evidence_ids": [note_id],
+    }));
+    let uncertain = Candidate {
+        claim_id: format!("uncertain_{}", target.id),
+        kind: "unknown".into(),
+        origin: "agent".into(),
+        confidence: "hypothesis".into(),
+        text: target.text.clone(),
+        subject: None,
+        evidence_ids: target.evidence_ids.clone(),
+        source_text,
+        support_text: None,
+        task_subject: task_subject.to_string(),
+    };
+    accept_or_record(log, &uncertain, projection, seen, report);
+}
+
 fn content_overlap(claim: &str, support: &str) -> usize {
     let support_tokens: BTreeSet<String> = content_tokens(support).collect();
     content_tokens(claim)
@@ -1387,8 +1928,9 @@ mod tests {
 
     #[test]
     fn a_grounded_sed_note_cites_the_tool_output() {
-        let output =
-            "len([c for c in self._connections if not c.is_idle()]) < self._max_connections";
+        let output = "\
+            len([c for c in self._connections if not c.is_idle()]) < self._max_connections\n\
+            connection = self.create_connection(origin)";
         let mut events = vec![
             shell("s", 1, "python -m pytest tests/test_pool_counts.py", "", 1),
             shell("g", 2, "sed -n 10p pool.py", output, 0),
@@ -1408,9 +1950,12 @@ mod tests {
     }
 
     #[test]
-    fn contradictory_conclusions_both_stay_until_an_explicit_retract() {
-        let output =
-            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+    fn a_contradicted_conclusion_is_absent_with_or_without_a_retract() {
+        let output = "\
+            def deliver(self, message):\n    \
+            self.retry_count += 1\n    \
+            self.open_socket()\n    \
+            self.socket.send(message)\n";
         let first = "deliver increments retry_count before open_socket, so the first send is already counted as a retry.";
         let second = "The first send is not counted, so retry_count stays at zero until a failure.";
         let base = vec![
@@ -1431,7 +1976,11 @@ mod tests {
         let projection = fold(&open);
         let realities = current_texts(&projection, ClaimKind::Reality);
         assert!(realities.iter().any(|text| text == first));
-        assert!(realities.iter().any(|text| text == second));
+        assert!(
+            !realities.iter().any(|text| text == second),
+            "contradicted conclusion was admitted: {realities:?}"
+        );
+        assert!(skip_reasons(&report).contains("contradicts"));
 
         let mut retracted = base;
         retracted.push(note("r", 5, &format!("Retract: {second}")));
@@ -1440,13 +1989,11 @@ mod tests {
         let projection = fold(&retracted);
         let realities = current_texts(&projection, ClaimKind::Reality);
         assert!(realities.iter().any(|text| text == first));
-        assert!(!realities.iter().any(|text| text == second));
+        assert!(!realities.iter().any(|text| text.contains("not counted")));
         assert!(
-            projection
-                .claims
-                .iter()
-                .filter(|claim| claim.text == second)
-                .all(|claim| claim.status == ClaimStatus::Superseded)
+            skip_reasons(&report).contains("does not quote"),
+            "a retract of a sentence that was never admitted should not rewrite another claim: {}",
+            skip_reasons(&report)
         );
     }
 
@@ -1476,6 +2023,424 @@ mod tests {
             current_texts(&projection, ClaimKind::Decision)
                 .iter()
                 .any(|item| item == text)
+        );
+    }
+
+    fn texts_of(report: &HandoffReport) -> Vec<String> {
+        report
+            .accepted
+            .iter()
+            .filter(|item| item.get("kind").and_then(|value| value.as_str()) != Some("conflict"))
+            .filter_map(|item| {
+                item.get("text")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            })
+            .collect()
+    }
+
+    fn skip_reasons(report: &HandoffReport) -> String {
+        report
+            .skipped
+            .iter()
+            .filter_map(|item| item.get("reason").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn an_unsupported_conclusion_is_skipped_and_never_observed() {
+        let output = "AssertionError: retry_count 2 != 1\nE   assert 2 == 1";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", output, 1),
+            conclusion(
+                "c",
+                2,
+                "The worker queue is the real cause of the stalled flush.",
+                "s",
+            ),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.accepted.is_empty(), "{:?}", report.accepted);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        let reason = report.skipped[0]["reason"].as_str().unwrap();
+        assert!(
+            reason.contains("speech act") || reason.contains("grounded"),
+            "{reason}"
+        );
+        let projection = fold(&events);
+        assert!(
+            projection
+                .claims
+                .iter()
+                .filter(|claim| claim.origin != ClaimOrigin::Projector)
+                .all(|claim| claim.confidence != ClaimConfidence::Observed)
+        );
+    }
+
+    #[test]
+    fn one_shared_word_does_not_admit_a_fabricated_cause() {
+        let mut events = vec![
+            shell(
+                "s",
+                1,
+                "python -m pytest -q tests/test_retry.py",
+                "AssertionError: retry_count 2 != 1",
+                1,
+            ),
+            conclusion(
+                "c",
+                2,
+                "The retry budget is exhausted in a database pool.",
+                "s",
+            ),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(
+            texts_of(&report)
+                .iter()
+                .all(|text| !text.contains("database pool")),
+            "{:?}",
+            report.accepted
+        );
+    }
+
+    #[test]
+    fn conflicting_decisions_become_uncertain_until_one_is_retracted() {
+        let output =
+            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+        let earlier = "Decision: count the first send as a retry.";
+        let later = "Decision: leave the first send at zero.";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", output, 1),
+            note("d1", 2, earlier),
+            note("d2", 3, later),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        let projection = fold(&events);
+        let decisions = current_texts(&projection, ClaimKind::Decision);
+        assert!(
+            decisions.is_empty(),
+            "conflicting decisions stayed verified: {decisions:?}"
+        );
+        let uncertain = current_texts(&projection, ClaimKind::Unknown);
+        assert!(uncertain.iter().any(|text| text == earlier));
+        assert!(uncertain.iter().any(|text| text == later));
+        assert!(
+            report
+                .accepted
+                .iter()
+                .any(|item| item["kind"] == "conflict")
+        );
+
+        events.push(note("r", 4, &format!("Retract: {earlier}")));
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        let projection = fold(&events);
+        let uncertain = current_texts(&projection, ClaimKind::Unknown);
+        assert!(!uncertain.iter().any(|text| text == earlier));
+        assert!(uncertain.iter().any(|text| text == later));
+        assert!(current_texts(&projection, ClaimKind::Decision).is_empty());
+        assert!(
+            current_texts(&projection, ClaimKind::Reality)
+                .iter()
+                .any(|text| { text.contains("exited 1") })
+        );
+    }
+
+    #[test]
+    fn a_retract_that_does_not_quote_a_claim_changes_nothing() {
+        let kept = "Decision: count the first send as a retry.";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            note("d", 2, kept),
+            note("r", 3, "Retract: the timeout path is not the cause."),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        assert_eq!(
+            current_texts(&fold(&events), ClaimKind::Decision),
+            vec![kept.to_string()]
+        );
+        let reasons = report
+            .skipped
+            .iter()
+            .filter_map(|item| item.get("reason").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(reasons.contains("does not quote"), "{reasons}");
+    }
+
+    #[test]
+    fn a_retract_cannot_supersede_the_observed_exit() {
+        let command = "python -m pytest -q tests/test_retry.py";
+        let mut events = vec![
+            shell("s", 1, command, "AssertionError: retry_count 2 != 1", 1),
+            note("r", 2, &format!("Retract: {command} exited 1")),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.accepted.is_empty(), "{:?}", report.accepted);
+        let projection = fold(&events);
+        assert!(
+            current_texts(&projection, ClaimKind::Reality)
+                .iter()
+                .any(|text| text.as_str() == format!("{command} exited 1"))
+        );
+    }
+
+    #[test]
+    fn an_uncertain_sentence_is_a_hypothesis_and_not_a_reality() {
+        let mut events = vec![
+            shell(
+                "s",
+                1,
+                "python -m pytest -q tests/test_retry.py",
+                "AssertionError: retry_count 2 != 1",
+                1,
+            ),
+            conclusion(
+                "c",
+                2,
+                "A shared counter in another service might be involved.",
+                "s",
+            ),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        assert_eq!(report.accepted.len(), 1, "{:?}", report.accepted);
+        assert_eq!(report.accepted[0]["kind"], "unknown");
+        assert_eq!(report.accepted[0]["confidence"], "hypothesis");
+        assert_ne!(report.accepted[0]["confidence"], "observed");
+        let projection = fold(&events);
+        assert!(
+            current_texts(&projection, ClaimKind::Reality)
+                .iter()
+                .all(|text| { text.contains("exited 1") })
+        );
+        assert!(
+            current_texts(&projection, ClaimKind::Unknown)
+                .iter()
+                .any(|text| text.contains("might be involved"))
+        );
+        assert!(current_texts(&projection, ClaimKind::Decision).is_empty());
+    }
+
+    #[test]
+    fn unstructured_agent_text_is_skipped() {
+        let mut events = vec![
+            shell(
+                "s",
+                1,
+                "python -m pytest -q tests/test_retry.py",
+                "AssertionError: retry_count 2 != 1",
+                1,
+            ),
+            conclusion("q", 2, "Which file owns this counter?", "s"),
+            conclusion(
+                "c",
+                3,
+                "Picking this up from the last session and looking at the files.",
+                "s",
+            ),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.accepted.is_empty(), "{:?}", report.accepted);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        assert_eq!(report.skipped.len(), 2, "{:?}", report.skipped);
+    }
+
+    #[test]
+    fn misleading_keyword_overlap_is_not_a_current_fact() {
+        let output =
+            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+        let sentence = "The retry_count before open_socket means the database pool is exhausted.";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, sentence, "g"),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        let texts = texts_of(&report);
+        assert!(
+            texts.iter().all(|text| !text.contains("database")),
+            "{texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("retry_count before open_socket")),
+            "{texts:?}"
+        );
+        assert!(current_texts(&fold(&events), ClaimKind::Unknown).is_empty());
+    }
+
+    #[test]
+    fn a_new_cause_in_the_same_clause_is_not_admitted() {
+        let output =
+            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+        let sentence = "The retry_count database pool is exhausted.";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, sentence, "g"),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        assert!(
+            texts_of(&report)
+                .iter()
+                .all(|text| !text.contains("database")),
+            "{:?}",
+            report.accepted
+        );
+        assert!(skip_reasons(&report).contains("not supported"));
+    }
+
+    #[test]
+    fn a_supported_clause_is_kept_when_a_later_clause_is_not() {
+        let output = "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n    self.socket.send(message)\n";
+        let sentence =
+            "deliver increments retry_count before open_socket, so the database pool is exhausted.";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, sentence, "g"),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        let texts = texts_of(&report);
+        assert_eq!(
+            texts,
+            vec!["deliver increments retry_count before open_socket".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_conclusion_that_denies_an_increment_is_not_admitted_without_a_retract() {
+        let output = "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n    self.socket.send(message)\n";
+        let sentence =
+            "The first send is not counted, so retry_count stays at zero until a failure.";
+        let kept = "deliver increments retry_count before open_socket, so the first send is already counted as a retry.";
+        let mut events = vec![
+            shell(
+                "s",
+                1,
+                "python -m pytest -q tests/test_retry.py",
+                "AssertionError: retry_count 2 != 1",
+                1,
+            ),
+            conclusion("true_finding", 2, kept, "g"),
+            shell("g", 3, "sed -n 12,18p courier.py", output, 0),
+            conclusion("false_finding", 4, sentence, "g"),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        let reasons = skip_reasons(&report);
+        assert!(reasons.contains("contradicts"), "{reasons}");
+        let realities = current_texts(&fold(&events), ClaimKind::Reality);
+        assert!(realities.iter().any(|text| text == kept));
+        assert!(!realities.iter().any(|text| text.contains("not counted")));
+    }
+
+    #[test]
+    fn reversed_identifier_order_is_not_a_current_fact() {
+        let output =
+            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+        let sentence = "open_socket runs before retry_count is incremented.";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, sentence, "g"),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(texts_of(&report).is_empty(), "{:?}", report.accepted);
+        assert!(skip_reasons(&report).contains("contradicts"));
+    }
+
+    #[test]
+    fn a_file_read_paraphrase_stays_supported_and_a_new_cause_does_not() {
+        let output = "\
+            elif (\n\
+                len([c for c in self._connections if not c.is_idle()])\n\
+                < self._max_connections\n\
+            ):\n\
+                connection = self.create_connection(origin)\n\
+            elif idle_connections:\n\
+                connection = idle_connections[0]\n";
+        let grounded = "The create-new-connection branch only counts connections that are not idle, so idle keepalive connections never count toward max_connections and the idle-eviction branch below it is never reached.";
+        let invented = "The idle connection branch means the database pool is exhausted.";
+        let mut events = vec![
+            shell(
+                "s",
+                1,
+                "python -m pytest -q tests/test_pool_counts.py",
+                "fail",
+                1,
+            ),
+            shell("g", 2, "sed -n 305,335p connection_pool.py", output, 0),
+            note("n", 3, grounded),
+            conclusion("bad", 4, invented, "g"),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        let licensed = "The create-new-connection branch only counts connections that are not idle";
+        let realities = current_texts(&fold(&events), ClaimKind::Reality);
+        assert!(
+            realities.iter().any(|text| text == licensed),
+            "{realities:?}"
+        );
+        assert!(!realities.iter().any(|text| text.contains("keepalive")));
+        assert!(!realities.iter().any(|text| text.contains("eviction")));
+        assert!(!realities.iter().any(|text| text.contains("database")));
+    }
+
+    #[test]
+    fn a_repeated_conclusion_is_admitted_once() {
+        let sentence = "The failure is retry_count 2 where the test expects 1.";
+        let mut events = vec![
+            shell(
+                "s",
+                1,
+                "python -m pytest -q tests/test_retry.py",
+                "AssertionError: retry_count 2 != 1\nE   assert 2 == 1",
+                1,
+            ),
+            conclusion("c1", 2, sentence, "s"),
+            conclusion("c2", 3, sentence, "s"),
+            shell(
+                "s2",
+                4,
+                "python -m pytest -q tests/test_retry.py",
+                "AssertionError: retry_count 2 != 1\nE   assert 2 == 1",
+                1,
+            ),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        assert_eq!(
+            texts_of(&report)
+                .iter()
+                .filter(|text| text.as_str() == sentence)
+                .count(),
+            1,
+            "{:?}",
+            report
+        );
+        let reasons = report
+            .skipped
+            .iter()
+            .filter_map(|item| item.get("reason").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(reasons.contains("duplicate"), "{reasons}");
+        assert_eq!(
+            current_texts(&fold(&events), ClaimKind::Reality)
+                .iter()
+                .filter(|text| text.as_str() == sentence)
+                .count(),
+            1
         );
     }
 

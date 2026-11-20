@@ -148,7 +148,8 @@ def test_reality_needs_the_preceding_tool_output() -> None:
         _cmd(
             2,
             "sed -n 10p pool.py",
-            "len([c for c in self._connections if not c.is_idle()]) < self._max_connections",
+            "len([c for c in self._connections if not c.is_idle()]) < self._max_connections\n"
+            "connection = self.create_connection(origin)",
         ),
         _note(
             3,

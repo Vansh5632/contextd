@@ -1,0 +1,11 @@
+Finding: the visible test tests/test_retry.py fails with retry_count 2 where it expects 1. deliver increments retry_count before open_socket, so the first send is already counted as a retry.
+
+Constraint: Keep deliver's signature unchanged.
+
+Constraint: Do not add a dependency.
+
+Ruled out: The timeout path is not the cause. deliver has no timeout handling. Do not edit timeouts.py.
+
+Unresolved: A shared counter in another service might be involved. Leave it alone.
+
+Next step: move the increment to after a failed send and rerun tests/test_retry.py.
