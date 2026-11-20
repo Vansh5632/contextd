@@ -1,0 +1,18 @@
+name: prior-investigation-pool
+level: l2
+category: prior-investigation
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: pool
+    offset: -8h
+    events:
+      - source: note
+        payload: {kind: ruled_out, text: DB connection pool is healthy}
+      - source: note
+        payload: {kind: hypothesis, text: in-memory rate counter}
+prompt: "The flaky auth issue is happening again. Investigate."
+gold:
+  required: ["connection pool is healthy", "rate counter"]
+layers: [0]
+l0_queries:
+  - {query: search, text: connection pool is healthy, limit: 20}

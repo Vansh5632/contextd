@@ -1,0 +1,83 @@
+name: auth-rate-limit-return
+level: l2
+category: debugging-frontier
+restraint: false
+requires_embeddings: false
+repo:
+  kind: fixture
+  path: fixtures/auth-service
+history:
+  - session: investigate
+    offset: -26h
+    intent: investigate intermittent 429s in the login rate limiter
+    events:
+      - source: file_system
+        payload: {path: src/auth/rate_limit.rs, action: Modify}
+      - source: file_system
+        payload: {path: src/auth/login.rs, action: Modify}
+      - source: file_system
+        payload: {path: src/config.rs, action: Modify}
+      - source: file_system
+        payload: {path: tests/login_rate_limit.rs, action: Modify}
+      - source: shell
+        payload:
+          command: cargo test login_rate_limit
+          exit_code: 101
+          stderr: "thread 'login_rate_limit' panicked at src/auth/rate_limit.rs:40"
+      - source: shell
+        payload: {command: 'rg remaining', exit_code: 0}
+      - source: shell
+        payload: {command: git diff, exit_code: 0}
+      - source: note
+        payload: {kind: finding, text: "failure occurs under concurrent login"}
+      - source: note
+        payload: {kind: ruled_out, text: database lock contention}
+      - source: note
+        payload: {kind: hypothesis, text: AtomicUsize decrement race}
+      - source: note
+        payload:
+          kind: decision
+          text: do not introduce Redis
+          reason: operational complexity is not justified yet
+      - source: note
+        payload: {kind: next_step, text: inspect concurrent decrement path}
+  - session: interference
+    offset: -4h
+    intent: database migration
+    events:
+      - source: git
+        payload: {action: checkout, message: feature/payment-webhook, to: feature/payment-webhook}
+    generate:
+      count: 80
+      source: file_system
+      payload:
+        path: "src/db/migrations/{i}.sql"
+        action: Modify
+prompt: "Pick up the auth bug from yesterday and finish it."
+gold:
+  required:
+    - AtomicUsize
+    - rate_limit.rs
+  forbidden:
+    - Stripe
+  frontier:
+    known:
+      - concurrent login
+    ruled_out:
+      - database lock contention
+    hypothesis:
+      - AtomicUsize
+    next_step:
+      - decrement
+  decisions:
+    - text: do not introduce Redis
+  expected_tools:
+    - context_now
+layers: [0, 1]
+arms: [none, dump, mcp]
+l0_queries:
+  - query: now
+  - {query: search, text: AtomicUsize, limit: 10}
+  - {query: search, text: rate_limit.rs, limit: 10}
+  - {query: search, text: concurrent login, limit: 10}
+  - {query: recall, text: AtomicUsize decrement race, limit: 10}

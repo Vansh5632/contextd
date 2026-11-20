@@ -1,0 +1,44 @@
+name: multi-day-supersession
+level: l3
+category: debugging-frontier
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: tuesday
+    offset: -3d
+    intent: investigate login 429s
+    events:
+      - source: note
+        payload: {kind: hypothesis, text: Redis race}
+      - source: git
+        payload: {action: checkout, to: feature/auth-rate-limit, message: feature/auth-rate-limit}
+  - session: wednesday
+    offset: -1d
+    events:
+      - source: note
+        payload: {kind: ruled_out, text: Redis hypothesis disproved}
+      - source: note
+        payload: {kind: hypothesis, text: Actual cause suspected in local counter}
+  - session: today
+    offset: -30m
+    events:
+      - source: note
+        payload: {kind: next_step, text: inspect concurrent decrement path}
+  - session: noise
+    offset: -4h
+    intent: add Stripe retry handling
+    generate:
+      count: 40
+      source: file_system
+      payload: {path: "src/payments/retry_{i}.rs", action: Modify}
+prompt: "Pick up the auth bug from yesterday and finish it."
+gold:
+  required: ["local counter", "Redis hypothesis disproved"]
+  forbidden: []
+  frontier:
+    ruled_out: ["Redis hypothesis disproved"]
+    hypothesis: ["local counter"]
+    next_step: ["decrement"]
+layers: [0]
+l0_queries:
+  - {query: search, text: local counter, limit: 20}
+  - {query: search, text: Redis hypothesis disproved, limit: 10}

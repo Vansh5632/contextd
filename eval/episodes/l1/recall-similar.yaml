@@ -1,0 +1,49 @@
+name: recall-similar
+level: l1
+category: long-term-recall
+restraint: false
+requires_embeddings: false
+repo:
+  kind: fixture
+  path: fixtures/auth-service
+history:
+  - session: last-tuesday
+    offset: -2d
+    events:
+      - source: shell
+        payload:
+          command: cargo test login_rate_limit
+          exit_code: 101
+          stderr: "thread 'auth::login_rate_limit' panicked at src/auth.rs:22:9"
+      - source: note
+        payload:
+          kind: finding
+          text: wrap the counter in a Mutex — that fixed it last Tuesday
+      - source: git
+        payload:
+          action: commit
+          message: wrap AtomicUsize counter in Mutex
+  - session: it-is-back
+    offset: -10s
+    events:
+      - source: shell
+        payload:
+          command: cargo test login_rate_limit
+          exit_code: 101
+          stderr: "thread 'auth::login_rate_limit' panicked at src/auth.rs:22:9"
+prompt: "This flaky rate-limit test is back. Have we seen it?"
+gold:
+  required:
+    - Mutex
+  expected_tools:
+    - recall_similar
+layers: [0, 1]
+arms: [none, dump, mcp]
+l0_queries:
+  - query: now
+  - query: search
+    text: Mutex
+    limit: 10
+  - query: recall
+    text: login_rate_limit
+    limit: 10

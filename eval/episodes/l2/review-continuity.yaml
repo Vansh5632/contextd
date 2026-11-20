@@ -1,0 +1,16 @@
+name: review-continuity
+level: l2
+category: review-continuity
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: pr
+    offset: -7h
+    events:
+      - source: note
+        payload: {kind: finding, text: "reviewer asked to avoid RwLock and use Mutex"}
+prompt: "Can you finish this?"
+gold:
+  required: ["avoid RwLock", "use Mutex"]
+layers: [0]
+l0_queries:
+  - {query: search, text: avoid RwLock, limit: 10}

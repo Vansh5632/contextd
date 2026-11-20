@@ -1,0 +1,32 @@
+name: intent-continuity
+level: l1
+category: intent-continuity
+restraint: false
+requires_embeddings: false
+repo:
+  kind: fixture
+  path: fixtures/auth-service
+history:
+  - session: wip
+    offset: -20s
+    intent: fixing the login rate limiter
+    events:
+      - source: file_system
+        payload:
+          path: src/auth.rs
+          action: Modify
+      - source: file_system
+        payload:
+          path: src/auth.rs
+          action: Modify
+prompt: "Continue what I was doing. Do not ask what it was."
+gold:
+  required:
+    - login rate limiter
+    - auth.rs
+  expected_tools:
+    - context_now
+layers: [0, 1]
+arms: [none, dump, mcp]
+l0_queries:
+  - query: now

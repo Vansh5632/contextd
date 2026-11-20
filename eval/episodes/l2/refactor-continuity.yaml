@@ -1,0 +1,20 @@
+name: refactor-continuity
+level: l2
+category: refactor-continuity
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: plan
+    offset: -1d
+    events:
+      - source: note
+        payload: {kind: decision, text: Migration must remain backwards compatible}
+      - source: note
+        payload: {kind: next_step, text: split rate_limit.rs after the tests go green}
+prompt: "Continue the refactor."
+gold:
+  required: ["backwards compatible", "split rate_limit.rs"]
+  decisions:
+    - {text: Migration must remain backwards compatible}
+layers: [0]
+l0_queries:
+  - {query: search, text: backwards compatible, limit: 10}

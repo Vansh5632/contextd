@@ -1,0 +1,16 @@
+name: file-continuity-function
+level: l2
+category: file-continuity
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: fn
+    offset: -12m
+    events:
+      - source: note
+        payload: {kind: finding, text: "the decrement lives in allow_login"}
+prompt: "Continue."
+gold:
+  required: ["allow_login"]
+layers: [0]
+l0_queries:
+  - {query: search, text: allow_login, limit: 10}

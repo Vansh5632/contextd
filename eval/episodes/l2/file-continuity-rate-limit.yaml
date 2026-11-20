@@ -1,0 +1,19 @@
+name: file-continuity-rate-limit
+level: l2
+category: file-continuity
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: files
+    offset: -45m
+    events:
+      - source: file_system
+        payload: {path: src/auth/rate_limit.rs, action: Modify}
+      - source: file_system
+        payload: {path: src/auth/rate_limit.rs, action: Modify}
+prompt: "Pick up where we left off."
+gold:
+  required: ["rate_limit.rs"]
+layers: [0]
+l0_queries:
+  - {query: now}
+  - {query: search, text: rate_limit.rs, limit: 10}

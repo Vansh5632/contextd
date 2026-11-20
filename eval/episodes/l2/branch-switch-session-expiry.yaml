@@ -1,0 +1,19 @@
+name: branch-switch-session-expiry
+level: l2
+category: branch-switching
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: expiry
+    offset: -2d
+    intent: fix session expiry
+    events:
+      - source: git
+        payload: {action: checkout, to: bugfix/session-expiry, message: bugfix/session-expiry}
+      - source: note
+        payload: {kind: finding, text: expiry is computed in utc but stored in local time}
+prompt: "Continue the session-expiry work."
+gold:
+  required: ["utc but stored in local"]
+layers: [0]
+l0_queries:
+  - {query: search, text: utc but stored in local, limit: 10}

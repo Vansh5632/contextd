@@ -1,0 +1,16 @@
+name: refactor-continuity-modules
+level: l2
+category: refactor-continuity
+repo: {kind: fixture, path: fixtures/auth-service}
+history:
+  - session: mods
+    offset: -3h
+    events:
+      - source: note
+        payload: {kind: next_step, text: move allow_login into a limiter module}
+prompt: "Continue."
+gold:
+  required: ["limiter module"]
+layers: [0]
+l0_queries:
+  - {query: search, text: limiter module, limit: 10}
