@@ -1,5 +1,7 @@
 # Component 2.1 baselines
 
-`results.json` in the measured commit is the 12 November 2026 capture. Its `git.revision` is `0714127c32aee3970d079f3a957e1f51ea151794` and its `git.status` is non-empty, including `crates/broker/src/extract.rs` and `eval/component21/`. That file is the superseded capture.
+`results.json` is the 17 November 2026 capture under the scorer that preceded `integrity-2`. Its `git.status` is empty and its `git.revision` is `baa457146d5a6c9f592b6aea2fa5278b533e4b8d`. Its 23 passes mix two daemon contract passes with skipped sentences, incomplete observations, a grader self-test, and synthetic traces. Read it as the before snapshot. The corrected reading is [the integrity report](../docs/integrity-report.md).
 
-The clean-tree rerun replaces `results.json`. The superseded file is kept as `dirty-tree-2026-11-12.json`. Cite a file only when its `git.status` is empty.
+`integrity-after.json` is the 20 November 2026 rescore with scorer `integrity-2`. Its `official` field is false because the tree was dirty. Same revision, same daemon, no model. Do not cite it as a clean-tree baseline.
+
+`dirty-tree-2026-11-12.json` is the superseded 12 November 2026 capture from dirty `0714127`. Do not cite it as the current result.

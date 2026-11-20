@@ -23,6 +23,8 @@ The [10 November validation](component-2.1-validation.md) records:
 - Against Component 1 in the latest run, the paired turn interval includes zero; the paired token interval excludes zero. This does not establish a general improvement in turns.
 - The retry-budget page was unchanged, so its live-agent matrix was not repeated. The [9 November evidence](component-2-evidence-validation.md) remains the recorded result for that page.
 
+The 17 November 2026 contract run on revision `baa457146d5a6c9f592b6aea2fa5278b533e4b8d` started from an empty `git status` and recorded 23 pass, 28 fail, and 5 blocked under the scorer that preceded `integrity-2`. That pass count is not a semantic result. The 20 November rescore of the same daemon, in [the integrity report](../eval/component21/docs/integrity-report.md), keeps two daemon contract passes (`f00` and `f18-hedge-might`) and moves skipped sentences to vacuous. Admitted agent conclusions remain inferred claims, not verified facts.
+
 The remaining problem is preserving useful, justified paraphrases without admitting a new unsupported mechanism beside a real identifier. These small episode-specific runs do not prove general correctness or broad agent compatibility. Admitted agent conclusions remain inferred claims, not verified facts.
 
 The research, design, and validation chain is indexed in [docs/README.md](README.md). Earlier reports describe their own snapshots and may have limits that subsequent work addressed.

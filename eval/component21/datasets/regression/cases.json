@@ -55,7 +55,9 @@
           "justification": "The listing executes retry_count += 1 and then calls open_socket().",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.retry_count += 1"
         }
       ],
       "suite": "regression",
@@ -118,7 +120,9 @@
           "justification": "The listing increments retry_count. The conclusion says it never increments.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.retry_count += 1"
         }
       ],
       "suite": "regression",
@@ -182,7 +186,9 @@
           "justification": "The listing adds 1. The conclusion says the increment is 999.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.retry_count += 1"
         }
       ],
       "suite": "regression",
@@ -246,7 +252,9 @@
           "justification": "Counter and socket are the same objects as retry_count and open_socket in this listing.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.retry_count += 1"
         }
       ],
       "suite": "regression",
@@ -313,7 +321,9 @@
           "justification": "The English clause matches the listing and can stand on its own.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.retry_count += 1"
         },
         {
           "id": "whole",
@@ -323,7 +333,9 @@
           "justification": "The listing does not show a database connection pool. The combined text must not be one established reality.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.retry_count += 1"
         }
       ],
       "suite": "regression",
@@ -450,7 +462,9 @@
           "justification": "In open_first the socket call is executed before bump, which is where attempt_budget increases.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.open_socket()"
         }
       ],
       "suite": "regression",
@@ -524,7 +538,9 @@
           "justification": "The filter keeps connections whose idle flag is false.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "idle"
+          "source_bind": "idle",
+          "evidence_bind": "source",
+          "snippet": "not item.idle"
         },
         {
           "id": "not-idle",
@@ -534,7 +550,9 @@
           "justification": "The comprehension counts items for which idle is not true.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "active"
+          "source_bind": "active",
+          "evidence_bind": "source",
+          "snippet": "not item.idle"
         }
       ],
       "suite": "regression",
@@ -605,7 +623,9 @@
           "justification": "An increment followed by a call does not establish that the increment causes the call.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "forward"
+          "source_bind": "forward",
+          "evidence_bind": "source",
+          "snippet": "self.attempt_budget += 1"
         },
         {
           "id": "reverse",
@@ -615,7 +635,9 @@
           "justification": "The same listing does not establish the opposite cause either.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "reverse"
+          "source_bind": "reverse",
+          "evidence_bind": "source",
+          "snippet": "self.attempt_budget += 1"
         }
       ],
       "suite": "regression",
@@ -681,7 +703,9 @@
           "justification": "The increment-before-call clause is supported by the listing.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.attempt_budget += 1"
         },
         {
           "id": "whole",
@@ -691,7 +715,9 @@
           "justification": "Nothing in the listing says the database pool is exhausted.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.attempt_budget += 1"
         }
       ],
       "suite": "regression",
@@ -755,7 +781,9 @@
           "justification": "The prefix restates the listing.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.attempt_budget += 1"
         },
         {
           "id": "whole",
@@ -765,7 +793,9 @@
           "justification": "The tail about the database pool is not in the listing.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "self.attempt_budget += 1"
         }
       ],
       "suite": "regression",
@@ -972,7 +1002,9 @@
           "justification": "The cited listing returns 3 and does not mention an assertion. The assertion text is a different event.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "source",
+          "snippet": "return 3"
         }
       ],
       "suite": "regression",
@@ -1036,7 +1068,9 @@
           "provenance": "agent",
           "checkpoint": "final",
           "task_bind": "beta",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "beta",
+          "snippet": "beta_budget += 1"
         }
       ],
       "suite": "regression",
@@ -1105,7 +1139,9 @@
           "provenance": "agent",
           "checkpoint": "final",
           "task_bind": "right",
-          "source_bind": "conclusion"
+          "source_bind": "conclusion",
+          "evidence_bind": "right",
+          "snippet": "right_budget += 1"
         }
       ],
       "suite": "regression",
@@ -1360,7 +1396,9 @@
           "justification": "Revision A of the cited output increments attempt_budget before open_socket.",
           "provenance": "agent",
           "checkpoint": "after_rev_a",
-          "source_bind": "finding"
+          "source_bind": "finding",
+          "evidence_bind": "fail_a",
+          "snippet": "self.attempt_budget += 1"
         },
         {
           "id": "stale",
@@ -1378,7 +1416,8 @@
           "expect": "must_stay_current",
           "justification": "The widget task was not changed by the courier command.",
           "provenance": "agent",
-          "checkpoint": "after_pass"
+          "checkpoint": "after_pass",
+          "metric_role": "unrelated_retention"
         },
         {
           "id": "corrected",
@@ -1387,7 +1426,8 @@
           "expect": "must_be_superseded",
           "justification": "A later note retracts the old finding. Client submission order is the ordering oracle.",
           "provenance": "agent",
-          "checkpoint": "after_correction"
+          "checkpoint": "after_correction",
+          "metric_role": "supersession"
         },
         {
           "id": "restart",
@@ -1396,7 +1436,8 @@
           "expect": "must_be_superseded",
           "justification": "The retraction must still hold after the daemon replays its log.",
           "provenance": "agent",
-          "checkpoint": "final"
+          "checkpoint": "final",
+          "metric_role": "restart_state"
         },
         {
           "id": "unrelated-restart",
@@ -1405,7 +1446,8 @@
           "expect": "must_stay_current",
           "justification": "Restart must not drop the unrelated widget finding.",
           "provenance": "agent",
-          "checkpoint": "final"
+          "checkpoint": "final",
+          "metric_role": "unrelated_retention"
         }
       ],
       "suite": "regression",
@@ -1539,7 +1581,22 @@
           "expect": "must_stay_current",
           "justification": "The retract note was submitted in the beta session. It must not supersede the alpha claim.",
           "provenance": "agent",
-          "checkpoint": "final"
+          "checkpoint": "final",
+          "metric_role": "cross_task",
+          "evidence_bind": "alpha_tool",
+          "snippet": "alpha_budget += 1"
+        },
+        {
+          "id": "beta",
+          "text": "beta_budget increments",
+          "factuality": "SUPPORTED",
+          "expect": "must_stay_current",
+          "justification": "The beta claim was not retracted. It stays on the beta task.",
+          "provenance": "agent",
+          "checkpoint": "final",
+          "metric_role": "unrelated_retention",
+          "evidence_bind": "beta_tool",
+          "snippet": "beta_budget += 1"
         }
       ],
       "suite": "regression",
@@ -1621,7 +1678,9 @@
           "justification": "The listing still supports the increment, and the earlier copy was retracted before this restatement.",
           "provenance": "agent",
           "checkpoint": "final",
-          "source_bind": "again"
+          "source_bind": "again",
+          "evidence_bind": "source",
+          "snippet": "self.attempt_budget += 1"
         }
       ],
       "suite": "regression",
@@ -1692,7 +1751,10 @@
           "expect": "must_be_superseded",
           "justification": "The client retracted the claim after it was admitted. Replay must not apply that retract before the claim exists.",
           "provenance": "agent",
-          "checkpoint": "final"
+          "checkpoint": "final",
+          "metric_role": "restart_state",
+          "evidence_bind": "source",
+          "snippet": "self.attempt_budget += 1"
         }
       ],
       "suite": "regression",

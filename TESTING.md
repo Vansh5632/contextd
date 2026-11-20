@@ -85,20 +85,22 @@ Use the exact episode, arms, image pins, and run ID required by the experiment. 
 
 ## Component 2.1 contract
 
-The Component 2.1 suite scores an unmodified daemon. A failing case is a measurement, not a build failure. The fast tests below do not start the daemon. They check the grader, the frozen cases, the held-out checksum, and the recorded baseline file.
+The Component 2.1 suite scores an unmodified daemon. A failing case is a measurement, not a build failure. The fast tests below do not start the daemon. They check the grader, the frozen cases, the held-out checksum, and the pre-repair baseline file.
 
 ```bash
 cd eval/component21
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests -q --tb=line -p pytest
 ```
 
-To rebuild the daemon and rewrite the baseline:
+To rescore the daemon without a model or API key, build the binary and write a new file. `--allow-dirty` is for a working tree and must not replace `baseline/results.json`. That file is the 17 November pre-repair snapshot.
 
 ```bash
 cargo build -p contextd --bin contextd
 cd eval/component21
-python -m harness.run --output baseline/results.json --with-historical
+python -m harness.run --allow-dirty --reuse-binary --output baseline/integrity-after.json
 ```
+
+CI runs the same daemon suites with Ollama pointed at `127.0.0.1:9`. The job fails when the harness crashes or a skipped false claim is marked pass. It does not fail because the daemon fails the contract. The live continuation case stays blocked.
 
 ## Manual protocol and setup checks
 

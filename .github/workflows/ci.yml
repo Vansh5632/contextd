@@ -88,3 +88,40 @@ jobs:
       - name: Run Component 2.1 grader tests
         working-directory: eval/component21
         run: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests -q --tb=line -p pytest
+
+  component21-daemon:
+    name: Component 2.1 daemon evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build the daemon
+        run: cargo build -p contextd --bin contextd
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Score regression, development, and continuation
+        working-directory: eval/component21
+        run: python -m harness.run --suite regression --suite development --suite continuation --output "${{ runner.temp }}/component21-dev.json"
+
+      - name: Score the sealed held-out suite separately
+        working-directory: eval/component21
+        run: python -m harness.run --suite heldout --output "${{ runner.temp }}/component21-heldout.json"
+
+      - name: Fail only when the harness is untrustworthy
+        working-directory: eval/component21
+        run: |
+          python -m harness.ci_check "${{ runner.temp }}/component21-dev.json" --reject-heldout
+          python -m harness.ci_check "${{ runner.temp }}/component21-heldout.json"

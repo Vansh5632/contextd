@@ -125,6 +125,8 @@ CASES = [
                 "presented_iff_supported",
                 "The listing executes retry_count += 1 and then calls open_socket().",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.retry_count += 1",
             )
         ],
     ),
@@ -144,6 +146,8 @@ CASES = [
                 "presented_iff_supported",
                 "The listing increments retry_count. The conclusion says it never increments.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.retry_count += 1",
             )
         ],
     ),
@@ -163,6 +167,8 @@ CASES = [
                 "presented_iff_supported",
                 "The listing adds 1. The conclusion says the increment is 999.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.retry_count += 1",
             )
         ],
     ),
@@ -182,6 +188,8 @@ CASES = [
                 "presented_iff_supported",
                 "Counter and socket are the same objects as retry_count and open_socket in this listing.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.retry_count += 1",
             )
         ],
     ),
@@ -201,6 +209,8 @@ CASES = [
                 "presented_iff_supported",
                 "The English clause matches the listing and can stand on its own.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.retry_count += 1",
             ),
             atom(
                 "whole",
@@ -209,6 +219,8 @@ CASES = [
                 "presented_iff_supported",
                 "The listing does not show a database connection pool. The combined text must not be one established reality.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.retry_count += 1",
             ),
         ],
     ),
@@ -246,6 +258,8 @@ CASES = [
                 "presented_iff_supported",
                 "In open_first the socket call is executed before bump, which is where attempt_budget increases.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.open_socket()",
             )
         ],
     ),
@@ -273,6 +287,8 @@ CASES = [
                 "presented_iff_supported",
                 "The filter keeps connections whose idle flag is false.",
                 source_bind="idle",
+                evidence_bind="source",
+                snippet="not item.idle",
             ),
             atom(
                 "not-idle",
@@ -281,6 +297,8 @@ CASES = [
                 "presented_iff_supported",
                 "The comprehension counts items for which idle is not true.",
                 source_bind="active",
+                evidence_bind="source",
+                snippet="not item.idle",
             ),
         ],
     ),
@@ -308,6 +326,8 @@ CASES = [
                 "presented_iff_supported",
                 "An increment followed by a call does not establish that the increment causes the call.",
                 source_bind="forward",
+                evidence_bind="source",
+                snippet="self.attempt_budget += 1",
             ),
             atom(
                 "reverse",
@@ -316,6 +336,8 @@ CASES = [
                 "presented_iff_supported",
                 "The same listing does not establish the opposite cause either.",
                 source_bind="reverse",
+                evidence_bind="source",
+                snippet="self.attempt_budget += 1",
             ),
         ],
     ),
@@ -334,6 +356,8 @@ CASES = [
                 "presented_iff_supported",
                 "The increment-before-call clause is supported by the listing.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.attempt_budget += 1",
             ),
             atom(
                 "whole",
@@ -342,6 +366,8 @@ CASES = [
                 "presented_iff_supported",
                 "Nothing in the listing says the database pool is exhausted.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.attempt_budget += 1",
             ),
         ],
     ),
@@ -361,6 +387,8 @@ CASES = [
                 "presented_iff_supported",
                 "The prefix restates the listing.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.attempt_budget += 1",
             ),
             atom(
                 "whole",
@@ -369,6 +397,8 @@ CASES = [
                 "presented_iff_supported",
                 "The tail about the database pool is not in the listing.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="self.attempt_budget += 1",
             ),
         ],
     ),
@@ -461,6 +491,8 @@ CASES = [
                 "presented_iff_supported",
                 "The cited listing returns 3 and does not mention an assertion. The assertion text is a different event.",
                 source_bind="conclusion",
+                evidence_bind="source",
+                snippet="return 3",
             )
         ],
     ),
@@ -487,6 +519,8 @@ CASES = [
                 "The cited output is the command that ran in /work/beta. The claim belongs on that task.",
                 task_bind="beta",
                 source_bind="conclusion",
+                evidence_bind="beta",
+                snippet="beta_budget += 1",
             )
         ],
     ),
@@ -515,6 +549,8 @@ CASES = [
                 "The cited command ran in /work/right. An empty session id does not make it the /work/left task.",
                 task_bind="right",
                 source_bind="conclusion",
+                evidence_bind="right",
+                snippet="right_budget += 1",
             )
         ],
     ),
@@ -622,6 +658,8 @@ CASES = [
                 "Revision A of the cited output increments attempt_budget before open_socket.",
                 checkpoint="after_rev_a",
                 source_bind="finding",
+                evidence_bind="fail_a",
+                snippet="self.attempt_budget += 1",
             ),
             atom(
                 "stale",
@@ -638,6 +676,7 @@ CASES = [
                 "must_stay_current",
                 "The widget task was not changed by the courier command.",
                 checkpoint="after_pass",
+                metric_role="unrelated_retention",
             ),
             atom(
                 "corrected",
@@ -646,6 +685,7 @@ CASES = [
                 "must_be_superseded",
                 "A later note retracts the old finding. Client submission order is the ordering oracle.",
                 checkpoint="after_correction",
+                metric_role="supersession",
             ),
             atom(
                 "restart",
@@ -654,6 +694,7 @@ CASES = [
                 "must_be_superseded",
                 "The retraction must still hold after the daemon replays its log.",
                 checkpoint="final",
+                metric_role="restart_state",
             ),
             atom(
                 "unrelated-restart",
@@ -662,6 +703,7 @@ CASES = [
                 "must_stay_current",
                 "Restart must not drop the unrelated widget finding.",
                 checkpoint="final",
+                metric_role="unrelated_retention",
             ),
         ],
     ),
@@ -705,7 +747,20 @@ CASES = [
                 "SUPPORTED",
                 "must_stay_current",
                 "The retract note was submitted in the beta session. It must not supersede the alpha claim.",
-            )
+                metric_role="cross_task",
+                evidence_bind="alpha_tool",
+                snippet="alpha_budget += 1",
+            ),
+            atom(
+                "beta",
+                "beta_budget increments",
+                "SUPPORTED",
+                "must_stay_current",
+                "The beta claim was not retracted. It stays on the beta task.",
+                metric_role="unrelated_retention",
+                evidence_bind="beta_tool",
+                snippet="beta_budget += 1",
+            ),
         ],
     ),
     case(
@@ -734,6 +789,8 @@ CASES = [
                 "presented_iff_supported",
                 "The listing still supports the increment, and the earlier copy was retracted before this restatement.",
                 source_bind="again",
+                evidence_bind="source",
+                snippet="self.attempt_budget += 1",
             )
         ],
     ),
@@ -761,6 +818,9 @@ CASES = [
                 "INSUFFICIENT_EVIDENCE",
                 "must_be_superseded",
                 "The client retracted the claim after it was admitted. Replay must not apply that retract before the claim exists.",
+                metric_role="restart_state",
+                evidence_bind="source",
+                snippet="self.attempt_budget += 1",
             )
         ],
     ),

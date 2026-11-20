@@ -1,15 +1,20 @@
 # Baseline report
 
-Run at `2026-11-12T14:16:48Z` with:
+This file is the pre-repair reading of `baseline/results.json` (17 November 2026, clean revision `baa457146d5a6c9f592b6aea2fa5278b533e4b8d`). Its 23 passes count skipped false claims, incomplete observations, the regex self-test, and synthetic traces as passes. The scorer `integrity-2` rescore is [the integrity report](integrity-report.md). The fractions below are kept so the before numbers stay reproducible. They are not the semantic rates.
+
+Run at `2026-11-17T11:01:11Z` with:
 
 ```bash
 cargo build -p contextd --bin contextd
 cd eval/component21
-python -m datasets.freeze
 python -m harness.run --output baseline/results.json --with-historical
 ```
 
-Binary: `/home/vansh5632/contextd/target/debug/contextd`, package `0.1.0`, profile `debug`. Git revision `0714127c32aee3970d079f3a957e1f51ea151794`. The status recorded in the result file shows a dirty tree; the new evaluation files were uncommitted, and no production crate was edited. Model judge: none. Random seed: none. Dataset: `component21-eval-1`.
+The case files had already been frozen into the measured commit. This run did not freeze them again.
+
+Binary: `/home/vansh5632/contextd/target/debug/contextd`, package `0.1.0`, profile `debug`. Git revision `baa457146d5a6c9f592b6aea2fa5278b533e4b8d`. `git status` at the start of the run was empty. This file replaces the 12 November 2026 capture, which remains in `baseline/dirty-tree-2026-11-12.json` and names `0714127` with a dirty status. Model judge: none. Random seed: none. Dataset: `component21-eval-1`.
+
+Every case status and atom outcome matches that superseded capture. The counts below are a clean-tree measurement of the same extractor behavior, not a new score.
 
 Counts: 23 pass, 28 fail, 5 blocked, 53 executed, 56 total. The five blocked cases are the Done-reopen contract question, trim-budget, both authored-route cases, and the live continuation matrix.
 
@@ -63,4 +68,4 @@ The optional Component 0 scorer ran on the vendored limiter and retry-budget pac
 
 ## How to read a pass
 
-Development and held-out passes on negated, reordered, or conditional sentences used wording the checker did not admit. The regression negation uses `increments`, which is in the production interpretive list, and that negation was admitted. A pass on `increases` in another identifier family means the sentence was not presented. It does not mean the checker understood the negation.
+Development and held-out passes on negated, reordered, or conditional sentences used wording the checker did not admit. The regression negation uses `increments`, which is in the production interpretive list, and that negation was admitted. A pass on `increases` in another identifier family means the sentence was not presented. It does not mean the checker understood the negation. Scorer `integrity-2` records those cases as vacuous.

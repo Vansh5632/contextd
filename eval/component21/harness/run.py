@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import shlex
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from harness import DATASET_VERSION
+from harness import DATASET_VERSION, SCORER_VERSION
 from harness.daemon import REPO_ROOT, ensure_binary
 from harness.historical import historical_regex
 from harness.metrics import summarize
@@ -49,7 +51,7 @@ def require_clean(status: str) -> None:
         )
 
 
-def run_suites(names: list[str], with_historical: bool, binary: Path) -> dict[str, Any]:
+def run_suites(names: list[str], with_historical: bool, binary: Path, *, official: bool) -> dict[str, Any]:
     cases: list[dict[str, Any]] = []
     for name in names:
         for case in load_suite(name):
@@ -59,6 +61,8 @@ def run_suites(names: list[str], with_historical: bool, binary: Path) -> dict[st
             cases.append(result)
     document = {
         "dataset_version": DATASET_VERSION,
+        "scorer": SCORER_VERSION,
+        "official": official,
         "suites": names,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "git": git_snapshot(),
@@ -73,7 +77,7 @@ def run_suites(names: list[str], with_historical: bool, binary: Path) -> dict[st
         },
         "model": None,
         "random_seed": None,
-        "command": "python -m harness.run",
+        "command": "python -m harness.run" + ("" if len(sys.argv) == 1 else " " + shlex.join(sys.argv[1:])),
         "cases": cases,
         "metrics": summarize(cases),
         "historical_regex": historical_regex() if with_historical else {
@@ -86,12 +90,13 @@ def run_suites(names: list[str], with_historical: bool, binary: Path) -> dict[st
 
 
 def _counts(cases: list[dict[str, Any]]) -> dict[str, int]:
-    counts = {"pass": 0, "fail": 0, "blocked": 0}
+    counts = {"pass": 0, "fail": 0, "blocked": 0, "vacuous": 0, "incomplete": 0}
     for case in cases:
         status = case.get("status")
         if status in counts:
             counts[status] += 1
     counts["executed"] = sum(1 for case in cases if case.get("executed"))
+    counts["harness_errors"] = sum(1 for case in cases if case.get("harness_error"))
     counts["total"] = len(cases)
     return counts
 
@@ -117,14 +122,18 @@ def main() -> None:
         require_clean(snapshot["status"])
     binary = ensure_binary(rebuild=not args.reuse_binary)
     names = args.suite or list(SUITES)
-    document = run_suites(names, args.with_historical, binary)
+    document = run_suites(names, args.with_historical, binary, official=not args.allow_dirty)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(document, indent=2) + "\n")
     counts = document["counts"]
     print(
         f"wrote {args.output} pass={counts['pass']} fail={counts['fail']} "
-        f"blocked={counts['blocked']} revision={document['git']['revision']}"
+        f"vacuous={counts['vacuous']} incomplete={counts['incomplete']} "
+        f"blocked={counts['blocked']} harness_errors={counts['harness_errors']} "
+        f"revision={document['git']['revision']}"
     )
+    if counts["harness_errors"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

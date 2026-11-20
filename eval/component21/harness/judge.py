@@ -2,6 +2,10 @@
 
 Gold factuality is supplied by the case file. This module does not tokenize
 like the production extractor and does not treat a regex hit as support.
+
+A skipped or absent claim is not a semantic refusal. Supported claims that
+never appear still miss recall. Evidence is a separate facet: the cited
+event must contain the declared snippet as text.
 """
 
 from __future__ import annotations
@@ -9,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 ESTABLISHED = frozenset({"observed", "inferred", "stated"})
+BAD_FACTUALITY = frozenset({"CONTRADICTED", "INSUFFICIENT_EVIDENCE"})
 
 Fact = str  # SUPPORTED | CONTRADICTED | INSUFFICIENT_EVIDENCE
 
@@ -151,15 +156,70 @@ def _timestamp_reversed(claims_text: str, events: list[dict[str, Any]]) -> bool:
 
 
 def _duplicate_skip(atom: dict[str, Any], checkpoint: dict[str, Any]) -> bool:
+    """A duplicate skip counts only when it names this atom's bound unit."""
     bind = atom.get("source_bind")
-    unit = (checkpoint.get("binds") or {}).get(bind) if bind else None
+    if not bind:
+        return False
+    unit = (checkpoint.get("binds") or {}).get(bind)
+    if not unit:
+        return False
     for item in checkpoint.get("skipped") or []:
         reason = str(item.get("reason") or "").lower()
         if "duplicate" not in reason:
             continue
-        if unit is None or item.get("unit") == unit or item.get("claim_id") == unit:
+        if item.get("unit") == unit or item.get("claim_id") == unit:
             return True
     return False
+
+
+def _iter_strings(value: Any):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_strings(item)
+
+
+def evidence_outcome(
+    atom: dict[str, Any],
+    checkpoint: dict[str, Any],
+    *,
+    established: bool,
+) -> str:
+    """Cite-and-snippet check. Uncovered claims are not evidence decisions."""
+    snippet = atom.get("snippet")
+    bind_name = atom.get("evidence_bind")
+    if not snippet or not bind_name or not established:
+        return "not_applicable"
+    event_id = (checkpoint.get("binds") or {}).get(bind_name)
+    by_id = {event["id"]: event for event in checkpoint.get("store_events") or []}
+    if not event_id or event_id not in by_id:
+        return "evidence_missing"
+    text = atom["text"]
+    evidence_ids: list[str] = []
+    for row in _matching(checkpoint.get("store_claims") or [], text) + _matching(
+        checkpoint.get("rendered") or [], text
+    ):
+        evidence_ids.extend(row.get("evidence_ids") or [])
+    if event_id not in evidence_ids:
+        return "evidence_mismatch"
+    payload = by_id[event_id].get("payload") or {}
+    if not any(snippet in item for item in _iter_strings(payload)):
+        return "evidence_mismatch"
+    return "evidence_match"
+
+
+def _apply_evidence_status(status: str, evidence: str, fail) -> None:
+    """A citation failure is not a semantic pass. It does not rewrite vacuous or blocked atoms."""
+    if status != "pass":
+        return
+    if evidence == "evidence_missing":
+        fail("evidence_missing", "the cited observation is not in the store")
+    elif evidence == "evidence_mismatch":
+        fail("evidence_mismatch", "the cited observation does not contain the expected text")
 
 
 def judge_atom(atom: dict[str, Any], checkpoint: dict[str, Any]) -> dict[str, Any]:
@@ -180,6 +240,7 @@ def judge_atom(atom: dict[str, Any], checkpoint: dict[str, Any]) -> dict[str, An
 
     expect = atom["expect"]
     factuality = atom.get("factuality")
+    covered = checker in {"accepted", "rejected"} or established
 
     def fail(flag: str, message: str) -> None:
         nonlocal status, detail
@@ -193,6 +254,11 @@ def judge_atom(atom: dict[str, Any], checkpoint: dict[str, Any]) -> dict[str, An
         status = "blocked"
         detail = message
 
+    def vacuous(message: str) -> None:
+        nonlocal status, detail
+        status = "vacuous"
+        detail = message
+
     if expect == "presented_iff_supported":
         if factuality == "SUPPORTED":
             if not established:
@@ -203,9 +269,13 @@ def judge_atom(atom: dict[str, Any], checkpoint: dict[str, Any]) -> dict[str, An
                     flags.append("renderer_excluded")
                 else:
                     fail("not_presented", "a supported claim is not current")
-        elif factuality in {"CONTRADICTED", "INSUFFICIENT_EVIDENCE"}:
+        elif factuality in BAD_FACTUALITY:
             if established:
                 fail("presented_as_reality", "a claim the evidence does not support is current")
+            elif checker in {"skipped", "absent"}:
+                vacuous(
+                    "the checker skipped or never saw this claim; that is not a semantic refusal"
+                )
             elif checker == "accepted" and not presented:
                 flags.append("renderer_excluded")
         else:
@@ -270,20 +340,19 @@ def judge_atom(atom: dict[str, Any], checkpoint: dict[str, Any]) -> dict[str, An
         elif claim_tasks.isdisjoint(projector_tasks):
             fail("wrong_task", "the claim is attached to a different task than the cited command")
     elif expect == "evidence_resolves":
-        event_id = binds.get(atom.get("evidence_bind"))
-        by_id = {event["id"]: event for event in events}
-        evidence_ids: list[str] = []
-        for row in store_hit + rendered_hit:
-            evidence_ids.extend(row.get("evidence_ids") or [])
-        if not event_id or event_id not in by_id:
+        outcome = evidence_outcome(atom, checkpoint, established=established)
+        if outcome == "evidence_match":
+            detail = "the cited observation contains the expected text"
+        elif outcome == "evidence_missing":
             fail("evidence_missing", "the cited observation is not in the store")
-        elif event_id not in evidence_ids:
-            fail("evidence_mismatch", "the claim does not cite the expected observation")
+        elif outcome == "evidence_mismatch":
+            fail("evidence_mismatch", "the claim does not cite the observation that contains the expected text")
+        elif not atom.get("snippet") or not atom.get("evidence_bind"):
+            block("evidence_resolves requires snippet and evidence_bind")
+        elif checker in {"skipped", "absent"} and not established:
+            vacuous("the claim was not stored, so its evidence citation was not checked")
         else:
-            snippet = atom.get("snippet")
-            payload = json.dumps(by_id[event_id].get("payload") or {})
-            if snippet and snippet not in payload:
-                fail("evidence_mismatch", "the cited observation does not contain the expected text")
+            fail("evidence_missing", "the cited observation is not in the store")
     elif expect == "evidence_incomplete":
         event_id = binds.get(atom.get("evidence_bind"))
         by_id = {event["id"]: event for event in events}
@@ -299,9 +368,20 @@ def judge_atom(atom: dict[str, Any], checkpoint: dict[str, Any]) -> dict[str, An
             flag = atom.get("when_presented") or "evidence_missing_but_presented"
             fail(flag, "incomplete evidence is still presented as an established reality")
         else:
+            status = "incomplete"
+            detail = "incomplete evidence was not presented; that does not show the checker judged it"
+            flags.append("incomplete_not_admitted")
             flags.append("output_removed")
     else:
         block(f"unknown expectation {expect}")
+
+    evidence = "not_applicable"
+    if expect != "evidence_incomplete":
+        evidence = evidence_outcome(atom, checkpoint, established=established)
+        if expect != "evidence_resolves":
+            _apply_evidence_status(status, evidence, fail)
+        if evidence in {"evidence_mismatch", "evidence_missing"} and evidence not in flags and status == "fail":
+            flags.append(evidence)
 
     if _duplicate_skip(atom, checkpoint) and not established:
         flags.append("duplicate_blocks_restatement")
@@ -310,16 +390,29 @@ def judge_atom(atom: dict[str, Any], checkpoint: dict[str, Any]) -> dict[str, An
     if renderer_excluded and "renderer_excluded" not in flags:
         flags.append("renderer_excluded")
 
+    if status == "vacuous":
+        disposition = "vacuous"
+    elif status == "incomplete":
+        disposition = "incomplete"
+    elif status == "blocked":
+        disposition = "blocked"
+    else:
+        disposition = "semantic"
+
     return {
         "id": atom["id"],
         "text": text,
         "factuality": factuality,
         "expect": expect,
         "checkpoint": atom.get("checkpoint", "final"),
+        "metric_role": atom.get("metric_role"),
         "status": status,
+        "disposition": disposition,
+        "covered": covered,
         "passed": True if status == "pass" else False if status == "fail" else None,
         "flags": flags,
         "checker": checker,
+        "evidence": evidence,
         "presented_established": presented,
         "stored_current_reality": stored_current,
         "established": established,

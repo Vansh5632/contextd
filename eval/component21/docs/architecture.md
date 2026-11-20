@@ -51,4 +51,4 @@ The daemon is configured like the existing live protocol test: a temporary direc
 
 ## Metrics
 
-Rates keep their own denominators. A system that admits nothing has supported-claim precision `null`, not 1. A system that admits everything fails false-reality admission. The layers are semantic factuality, evidence and provenance, temporal state, protocol reliability, and checker versus renderer. Continuation credit is a separate layer and is scored from supplied traces, not from a live agent.
+Rates keep their own denominators, and held-out atoms are not pooled into the regression or development rates. A skipped false claim is vacuous: it is not a semantic refusal, and it is not in the false-admission denominator. A system that admits nothing has supported-claim precision `null`, not 1. A system that admits everything fails false-claim admission. Evidence citation, uncertainty, restart state, and process restart are separate rates. Continuation credit is scored from supplied traces, not from a live agent. The corrected baseline reading is [integrity-report.md](integrity-report.md).

@@ -13,6 +13,10 @@ def test_baseline_file_separates_pass_fail_and_blocked() -> None:
     document = json.loads(BASELINE.read_text())
     assert document["dataset_version"] == "component21-eval-1"
     assert document["git"]["revision"]
+    assert len(document["git"]["revision"]) == 40
+    assert document["git"]["status"] == ""
+    assert document["model"] is None
+    assert document["historical_regex"]["factuality_oracle"] is False
     counts = {"pass": 0, "fail": 0, "blocked": 0}
     failure_ids = set()
     for case in document["cases"]:
@@ -33,4 +37,3 @@ def test_baseline_file_separates_pass_fail_and_blocked() -> None:
     assert document["counts"]["pass"] == counts["pass"]
     assert document["counts"]["fail"] == counts["fail"]
     assert document["counts"]["blocked"] == counts["blocked"]
-    assert document["historical_regex"]["factuality_oracle"] is False

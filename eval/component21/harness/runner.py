@@ -12,6 +12,51 @@ from harness.store_observer import read_store
 PANIC_MARK = "panicked at"
 
 
+def incidents_from_steps(steps: list[dict[str, Any]], panic: bool) -> list[dict[str, Any]]:
+    """Request failures and panics. These are measurements, not empty successes."""
+    incidents: list[dict[str, Any]] = []
+    for step in steps:
+        if step.get("error") or step.get("transport_error"):
+            incidents.append(
+                {
+                    "client_seq": step.get("client_seq"),
+                    "action": step.get("action"),
+                    "query": step.get("query"),
+                    "error": step.get("error"),
+                    "transport_error": step.get("transport_error"),
+                }
+            )
+    if panic:
+        incidents.append({"kind": "panic", "error": PANIC_MARK})
+    return incidents
+
+
+def harness_error_judgment(atom: dict[str, Any], exc: Exception) -> dict[str, Any]:
+    return {
+        "id": atom.get("id"),
+        "text": atom.get("text"),
+        "factuality": atom.get("factuality"),
+        "expect": atom.get("expect"),
+        "checkpoint": atom.get("checkpoint", "final"),
+        "metric_role": atom.get("metric_role"),
+        "status": "blocked",
+        "disposition": "harness_error",
+        "covered": None,
+        "passed": None,
+        "flags": ["harness_error"],
+        "checker": "absent",
+        "evidence": "not_applicable",
+        "presented_established": False,
+        "stored_current_reality": False,
+        "established": False,
+        "origin": [],
+        "stored_status": [],
+        "renderer_excluded": False,
+        "detail": f"harness error: {exc}",
+        "justification": atom.get("justification"),
+    }
+
+
 def _session(case: dict[str, Any], step: dict[str, Any]) -> str:
     if "session" in step:
         return str(step["session"])
@@ -59,7 +104,7 @@ def _apply_step(
     client_seq: int,
 ) -> dict[str, Any]:
     action = step["action"]
-    record: dict[str, Any] = {"client_seq": client_seq, "action": action}
+    record: dict[str, Any] = {"client_seq": client_seq, "action": action, "transport_error": None}
     if action == "observe":
         body: dict[str, Any] = {
             "query": "observe",
@@ -74,6 +119,7 @@ def _apply_step(
         outcome = daemon.ask(body)
         record["query"] = "observe"
         record["error"] = outcome["error"]
+        record["transport_error"] = outcome.get("transport_error")
         response = outcome["response"] or {}
         event_id = response.get("event_id")
         record["event_id"] = event_id
@@ -85,6 +131,7 @@ def _apply_step(
         outcome = daemon.ask({"query": action})
         record["query"] = action
         record["error"] = outcome["error"]
+        record["transport_error"] = outcome.get("transport_error")
         response = outcome["response"] or {}
         state[action] = {"response": response, "error": outcome["error"]}
         if action == "handoff" and outcome["error"] is None:
@@ -106,6 +153,7 @@ def _apply_step(
         outcome = daemon.ask(body)
         record["query"] = "agent_claim"
         record["error"] = outcome["error"]
+        record["transport_error"] = outcome.get("transport_error")
         record["response"] = outcome["response"]
         if outcome["error"] is None:
             record["admitted_without_gate"] = True
@@ -116,12 +164,14 @@ def _apply_step(
         outcome = daemon.ask({"query": "user_claim", "kind": step["kind"], "text": text})
         record["query"] = "user_claim"
         record["error"] = outcome["error"]
+        record["transport_error"] = outcome.get("transport_error")
         record["response"] = outcome["response"]
         record["admitted_without_gate"] = outcome["error"] is None
     elif action == "intent":
         outcome = daemon.ask({"query": "intent", "text": step["text"]})
         record["query"] = "intent"
         record["error"] = outcome["error"]
+        record["transport_error"] = outcome.get("transport_error")
         record["admitted_without_gate"] = outcome["error"] is None
     elif action == "restart":
         try:
@@ -181,13 +231,24 @@ def reproduction_class(case: dict[str, Any], atoms: list[dict[str, Any]], execut
     return initial
 
 
-def _status_from_atoms(atoms: list[dict[str, Any]]) -> tuple[str, str | None, bool | None]:
-    if any(atom["status"] == "fail" for atom in atoms):
-        return "fail", None, False
-    if any(atom["status"] == "blocked" for atom in atoms):
-        reasons = [atom["detail"] for atom in atoms if atom["status"] == "blocked"]
-        return "blocked", reasons[0] if reasons else "atom blocked", None
-    return "pass", None, True
+def _status_from_atoms(atoms: list[dict[str, Any]]) -> tuple[str, str | None, bool | None, bool]:
+    harness = any(
+        atom.get("disposition") == "harness_error" or "harness_error" in (atom.get("flags") or [])
+        for atom in atoms
+    )
+    if any(atom.get("status") == "fail" for atom in atoms):
+        return "fail", None, False, harness
+    if harness:
+        reasons = [atom.get("detail") for atom in atoms if atom.get("disposition") == "harness_error"]
+        return "blocked", (reasons[0] if reasons else "harness error"), None, True
+    if any(atom.get("status") == "blocked" for atom in atoms):
+        reasons = [atom["detail"] for atom in atoms if atom.get("status") == "blocked"]
+        return "blocked", reasons[0] if reasons else "atom blocked", None, False
+    if any(atom.get("status") == "incomplete" for atom in atoms):
+        return "incomplete", None, None, False
+    if any(atom.get("status") == "vacuous" for atom in atoms):
+        return "vacuous", None, None, False
+    return "pass", None, True, False
 
 
 def execute_case(case: dict[str, Any], binary: Any) -> dict[str, Any]:
@@ -301,6 +362,8 @@ def execute_case(case: dict[str, Any], binary: Any) -> dict[str, Any]:
                 (now or {}).get("error") if isinstance(now, dict) else None,
             )
     except Exception as exc:
+        stderr_tail = daemon.stderr_text()[-2500:]
+        panic = PANIC_MARK in daemon.stderr_text()
         daemon.close()
         return {
             **base,
@@ -311,7 +374,10 @@ def execute_case(case: dict[str, Any], binary: Any) -> dict[str, Any]:
             "reproduction_class": reproduction_class(case, [], False),
             "atoms": [],
             "steps": steps,
-            "panic": False,
+            "panic": panic,
+            "stderr_tail": stderr_tail,
+            "incidents": incidents_from_steps(steps, panic),
+            "harness_error": True,
         }
 
     panic = PANIC_MARK in daemon.stderr_text()
@@ -348,10 +414,14 @@ def execute_case(case: dict[str, Any], binary: Any) -> dict[str, Any]:
                     "factuality": atom.get("factuality"),
                     "expect": atom["expect"],
                     "checkpoint": name,
+                    "metric_role": atom.get("metric_role"),
                     "status": "blocked",
+                    "disposition": "blocked",
+                    "covered": False,
                     "passed": None,
                     "flags": ["missing_checkpoint"],
                     "checker": "absent",
+                    "evidence": "not_applicable",
                     "presented_established": False,
                     "stored_current_reality": False,
                     "established": False,
@@ -363,23 +433,28 @@ def execute_case(case: dict[str, Any], binary: Any) -> dict[str, Any]:
                 }
             )
             continue
-        judgments.append(judge_atom(atom, checkpoint))
+        try:
+            judgments.append(judge_atom(atom, checkpoint))
+        except Exception as exc:
+            judgments.append(harness_error_judgment(atom, exc))
 
     if state.get("compaction_blocked"):
         for judgment in judgments:
             if judgment["expect"] == "evidence_incomplete" and judgment["status"] != "fail":
                 judgment["status"] = "blocked"
+                judgment["disposition"] = "blocked"
                 judgment["passed"] = None
                 judgment["detail"] = "compaction did not become visible before the timeout"
                 if "situation_not_reached" not in judgment["flags"]:
                     judgment["flags"].append("situation_not_reached")
 
-    status, blocked_reason, holds = _status_from_atoms(judgments)
+    status, blocked_reason, holds, harness_error = _status_from_atoms(judgments)
     if case.get("judgment") == "open_contract":
         status = "blocked"
         blocked_reason = "open_contract"
         holds = None
     executed = True
+    panic = PANIC_MARK in stderr_tail or panic
     return {
         **base,
         "executed": executed,
@@ -391,6 +466,8 @@ def execute_case(case: dict[str, Any], binary: Any) -> dict[str, Any]:
         "steps": steps,
         "panic": panic,
         "stderr_tail": stderr_tail,
+        "incidents": incidents_from_steps(steps, panic),
+        "harness_error": harness_error,
         "checkpoints": sorted(checkpoints),
         "store_summary": store_summary,
     }
