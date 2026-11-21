@@ -92,6 +92,7 @@ def _checkpoint(
         "now_error": now_error,
         "process_alive": daemon.alive(),
         "panic": PANIC_MARK in stderr,
+        "diagnostics": list((handoff or {}).get("diagnostics") or []),
     }
 
 
@@ -127,6 +128,8 @@ def _apply_step(
         if step.get("bind") and event_id:
             binds[step["bind"]] = str(event_id)
         record["bind"] = step.get("bind")
+        if step.get("kind") == "tool" and event_id:
+            state.setdefault("evidence_by_event", {})[str(event_id)] = str(step.get("output") or "")
     elif action in {"handoff", "now"}:
         outcome = daemon.ask({"query": action})
         record["query"] = action
@@ -138,6 +141,8 @@ def _apply_step(
             record["accepted"] = [item.get("text") for item in response.get("accepted") or []]
             record["skipped"] = response.get("skipped") or []
             record["rejected"] = response.get("rejected") or []
+            record["diagnostics"] = response.get("diagnostics") or []
+            state.setdefault("diagnostics", []).extend(record["diagnostics"])
         if action == "now" and outcome["error"] is None:
             record["claim_texts"] = [item["text"] for item in rendered_claims(response)]
     elif action == "agent_claim":
@@ -470,4 +475,6 @@ def execute_case(case: dict[str, Any], binary: Any) -> dict[str, Any]:
         "harness_error": harness_error,
         "checkpoints": sorted(checkpoints),
         "store_summary": store_summary,
+        "verifier_diagnostics": list(state.get("diagnostics") or []),
+        "evidence_by_event": dict(state.get("evidence_by_event") or {}),
     }

@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from harness.diagnostics import summarize_diagnostics
+
 BAD = frozenset({"CONTRADICTED", "INSUFFICIENT_EVIDENCE"})
 EVIDENCE_DECISIONS = frozenset({"evidence_match", "evidence_mismatch", "evidence_missing"})
 
@@ -343,4 +345,5 @@ def summarize(case_results: list[dict[str, Any]]) -> dict[str, Any]:
         "checker_versus_renderer": checker_renderer_split(daemon),
         "atom_judgments": len(daemon),
         "headline_case_ids": sorted({row["case_id"] for row in daemon}),
+        "diagnostics": summarize_diagnostics(case_results),
     }
