@@ -118,6 +118,8 @@ fn finish(
         "accepted": report.accepted,
         "rejected": report.rejected,
         "skipped": report.skipped,
+        "diagnostics": report.diagnostics,
+        "diagnostics_truncated": report.diagnostics_truncated,
         "snapshot": snapshot,
     });
     if let Err(err) = fs::write(

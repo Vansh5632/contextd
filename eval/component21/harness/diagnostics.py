@@ -14,6 +14,14 @@ from harness.shadow import AbstainingShadow, ShadowClassifier, run_shadow, shado
 
 BAD = frozenset({"CONTRADICTED", "INSUFFICIENT_EVIDENCE"})
 STAGE_RANK = {"admit": 3, "apply_extraction": 2, "keep_clause": 1}
+OUTCOME_RANK = {
+    "accepted": 2,
+    "extracted": 2,
+    "kept": 2,
+    "rejected": 1,
+    "skipped": 0,
+    "dropped": 0,
+}
 HEADLINE_SUITES = frozenset({"regression"})
 
 
@@ -41,7 +49,12 @@ def match_trace(atom_text: str, traces: list[dict[str, Any]]) -> dict[str, Any] 
     ]
     if not exact:
         return None
-    exact.sort(key=lambda trace: STAGE_RANK.get(str(trace.get("stage")), 0))
+    exact.sort(
+        key=lambda trace: (
+            STAGE_RANK.get(str(trace.get("stage")), 0),
+            OUTCOME_RANK.get(str(trace.get("outcome")), 0),
+        )
+    )
     return exact[-1]
 
 
@@ -61,6 +74,7 @@ def parent_trace(atom_text: str, traces: list[dict[str, Any]]) -> dict[str, Any]
         key=lambda trace: (
             len(_norm(str(trace.get("text") or ""))),
             -STAGE_RANK.get(str(trace.get("stage")), 0),
+            -OUTCOME_RANK.get(str(trace.get("outcome")), 0),
         )
     )
     return parents[0]
@@ -83,13 +97,11 @@ def bucket(atom: dict[str, Any]) -> str:
     return "other"
 
 
-def _evidence_ids(case: dict[str, Any]) -> list[str]:
-    found: list[str] = []
-    for step in case.get("steps") or []:
-        event_id = step.get("event_id")
-        if step.get("action") == "observe" and event_id and event_id not in found:
-            found.append(str(event_id))
-    return found
+def _evidence_by_event(case: dict[str, Any]) -> dict[str, str]:
+    stored = case.get("evidence_by_event")
+    if isinstance(stored, dict):
+        return {str(key): str(value) for key, value in stored.items()}
+    return {}
 
 
 def atom_rows(cases: list[dict[str, Any]], *, suites: set[str]) -> list[dict[str, Any]]:
@@ -145,11 +157,7 @@ def _shadow_block(
     for case in cases:
         if case.get("suite") not in suites or case.get("mode") != "daemon":
             continue
-        requests = shadow_requests(
-            case_traces(case),
-            str(case.get("evidence_text") or ""),
-            _evidence_ids(case),
-        )
+        requests = shadow_requests(case_traces(case), _evidence_by_event(case))
         for request, verdict in zip(requests, run_shadow(classifier, requests), strict=True):
             if verdict.writes_memory:
                 raise RuntimeError("shadow verdict attempted to write memory")

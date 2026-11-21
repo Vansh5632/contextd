@@ -7,9 +7,11 @@
 //!
 //! The live handoff path does not call this module.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
-use crate::extract::DecisionTrace;
+use crate::extract::{DecisionTrace, TraceOutcome, TraceStage};
 
 /// Labels a semantic verifier may return. These strings match the evaluation
 /// gold vocabulary.
@@ -84,37 +86,61 @@ pub fn run_shadow<C: ShadowClassifier>(
 ) -> Vec<ShadowVerdict> {
     requests
         .iter()
-        .map(|request| {
-            let verdict = classifier.classify(request);
-            ShadowVerdict {
-                label: verdict.label,
-                evidence_quote: verdict.evidence_quote,
-                writes_memory: false,
-            }
-        })
+        .map(|request| ground(request, classifier.classify(request)))
         .collect()
 }
 
+/// A non-abstaining label needs a nonempty quote copied from its own evidence.
+fn ground(request: &ShadowRequest, verdict: ShadowVerdict) -> ShadowVerdict {
+    let quote = verdict.evidence_quote.trim();
+    let grounded = !quote.is_empty() && request.evidence_text.contains(quote);
+    let label = if verdict.label == ShadowLabel::InsufficientEvidence || !grounded {
+        ShadowLabel::InsufficientEvidence
+    } else {
+        verdict.label
+    };
+    ShadowVerdict {
+        label,
+        evidence_quote: if grounded {
+            quote.to_string()
+        } else {
+            String::new()
+        },
+        writes_memory: false,
+    }
+}
+
 /// Candidates a shadow verifier should see: accepted claims and skipped or
-/// dropped clauses. An `admit` row wins over an earlier stage with the same text.
+/// dropped clauses. An accepted row wins over a duplicate skip of the same text.
+///
+/// Evidence is the output of `support_event_id` only. A trace with no cited
+/// shell event gets empty evidence, even when other tools ran in the session.
 pub fn shadow_requests(
     traces: &[DecisionTrace],
-    evidence_text: &str,
-    evidence_ids: &[String],
+    evidence_by_event: &BTreeMap<String, String>,
 ) -> Vec<ShadowRequest> {
     let mut chosen: Vec<&DecisionTrace> = Vec::new();
     for trace in traces {
         let interesting = matches!(
             (trace.stage, trace.outcome),
-            ("admit", "accepted" | "rejected" | "skipped")
-                | ("apply_extraction", "skipped" | "extracted")
-                | ("keep_clause", "dropped")
+            (
+                TraceStage::Admit,
+                TraceOutcome::Accepted | TraceOutcome::Rejected | TraceOutcome::Skipped
+            ) | (
+                TraceStage::ApplyExtraction,
+                TraceOutcome::Skipped | TraceOutcome::Extracted
+            ) | (TraceStage::KeepClause, TraceOutcome::Dropped)
         );
         if !interesting || trace.text.is_empty() {
             continue;
         }
         if let Some(existing) = chosen.iter().position(|row| row.text == trace.text) {
-            if stage_rank(trace.stage) >= stage_rank(chosen[existing].stage) {
+            let incoming = (stage_rank(trace.stage), trace.outcome.rank());
+            let current = (
+                stage_rank(chosen[existing].stage),
+                chosen[existing].outcome.rank(),
+            );
+            if incoming > current {
                 chosen[existing] = trace;
             }
         } else {
@@ -123,29 +149,38 @@ pub fn shadow_requests(
     }
     chosen
         .into_iter()
-        .map(|trace| ShadowRequest {
-            claim_text: trace.text.clone(),
-            evidence_text: evidence_text.to_string(),
-            evidence_ids: evidence_ids.to_vec(),
-            deterministic_outcome: trace.outcome.to_string(),
-            deterministic_reason: trace.reason.to_string(),
-            stage: trace.stage.to_string(),
+        .map(|trace| {
+            let (evidence_text, evidence_ids) = match trace.support_event_id.as_deref() {
+                Some(id) => (
+                    evidence_by_event.get(id).cloned().unwrap_or_default(),
+                    vec![id.to_string()],
+                ),
+                None => (String::new(), Vec::new()),
+            };
+            ShadowRequest {
+                claim_text: trace.text.clone(),
+                evidence_text,
+                evidence_ids,
+                deterministic_outcome: trace.outcome.as_str().to_string(),
+                deterministic_reason: trace.reason.as_str().to_string(),
+                stage: trace.stage.as_str().to_string(),
+            }
         })
         .collect()
 }
 
-fn stage_rank(stage: &str) -> u8 {
+fn stage_rank(stage: TraceStage) -> u8 {
     match stage {
-        "admit" => 3,
-        "apply_extraction" => 2,
-        "keep_clause" => 1,
-        _ => 0,
+        TraceStage::Admit => 3,
+        TraceStage::ApplyExtraction => 2,
+        TraceStage::KeepClause => 1,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extract::{TraceReason, TraceRelation};
 
     fn request(outcome: &str, reason: &str) -> ShadowRequest {
         ShadowRequest {
@@ -190,31 +225,81 @@ mod tests {
     }
 
     #[test]
+    fn a_supported_label_without_a_quote_abstains() {
+        struct Empty;
+        impl ShadowClassifier for Empty {
+            fn classify(&self, _request: &ShadowRequest) -> ShadowVerdict {
+                ShadowVerdict {
+                    label: ShadowLabel::Supported,
+                    evidence_quote: String::new(),
+                    writes_memory: false,
+                }
+            }
+        }
+        let verdicts = run_shadow(&Empty, &[request("accepted", "lexical_pass")]);
+        assert_eq!(verdicts[0].label, ShadowLabel::InsufficientEvidence);
+        assert!(verdicts[0].evidence_quote.is_empty());
+    }
+
+    fn row(
+        stage: TraceStage,
+        text: &str,
+        outcome: TraceOutcome,
+        reason: TraceReason,
+        relation: TraceRelation,
+        support: Option<&str>,
+    ) -> DecisionTrace {
+        DecisionTrace {
+            stage,
+            text: text.into(),
+            outcome,
+            reason,
+            relation,
+            support_event_id: support.map(str::to_string),
+        }
+    }
+
+    #[test]
     fn shadow_requests_keep_accepted_and_skipped_claims() {
         let traces = vec![
-            DecisionTrace {
-                stage: "keep_clause",
-                text: "the retry counter is incremented".into(),
-                outcome: "dropped",
-                reason: "residue",
-                relation: "insufficient",
-            },
-            DecisionTrace {
-                stage: "apply_extraction",
-                text: "retry_count never increments".into(),
-                outcome: "extracted",
-                reason: "lexical_pass",
-                relation: "supported",
-            },
-            DecisionTrace {
-                stage: "admit",
-                text: "retry_count never increments".into(),
-                outcome: "accepted",
-                reason: "lexical_pass",
-                relation: "supported",
-            },
+            row(
+                TraceStage::KeepClause,
+                "the retry counter is incremented",
+                TraceOutcome::Dropped,
+                TraceReason::Residue,
+                TraceRelation::Insufficient,
+                Some("e1"),
+            ),
+            row(
+                TraceStage::ApplyExtraction,
+                "retry_count never increments",
+                TraceOutcome::Extracted,
+                TraceReason::LexicalPass,
+                TraceRelation::Supported,
+                Some("e1"),
+            ),
+            row(
+                TraceStage::Admit,
+                "retry_count never increments",
+                TraceOutcome::Accepted,
+                TraceReason::LexicalPass,
+                TraceRelation::Supported,
+                Some("e1"),
+            ),
+            row(
+                TraceStage::Admit,
+                "retry_count never increments",
+                TraceOutcome::Skipped,
+                TraceReason::Duplicate,
+                TraceRelation::NotApplicable,
+                None,
+            ),
         ];
-        let requests = shadow_requests(&traces, "listing", &["e1".into()]);
+        let evidence = BTreeMap::from([
+            ("e1".to_string(), "listing".to_string()),
+            ("e2".to_string(), "unrelated tool output".to_string()),
+        ]);
+        let requests = shadow_requests(&traces, &evidence);
         assert_eq!(requests.len(), 2);
         let accepted = requests
             .iter()
@@ -224,6 +309,11 @@ mod tests {
         assert_eq!(accepted.deterministic_outcome, "accepted");
         assert_eq!(accepted.evidence_text, "listing");
         assert_eq!(accepted.evidence_ids, vec!["e1".to_string()]);
+        assert!(
+            requests
+                .iter()
+                .all(|row| !row.evidence_text.contains("unrelated"))
+        );
         assert!(
             requests
                 .iter()

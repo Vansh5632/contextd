@@ -128,8 +128,8 @@ def _apply_step(
         if step.get("bind") and event_id:
             binds[step["bind"]] = str(event_id)
         record["bind"] = step.get("bind")
-        if step.get("kind") == "tool":
-            state.setdefault("evidence_text", []).append(str(step.get("output") or ""))
+        if step.get("kind") == "tool" and event_id:
+            state.setdefault("evidence_by_event", {})[str(event_id)] = str(step.get("output") or "")
     elif action in {"handoff", "now"}:
         outcome = daemon.ask({"query": action})
         record["query"] = action
@@ -476,5 +476,5 @@ def execute_case(case: dict[str, Any], binary: Any) -> dict[str, Any]:
         "checkpoints": sorted(checkpoints),
         "store_summary": store_summary,
         "verifier_diagnostics": list(state.get("diagnostics") or []),
-        "evidence_text": "\n".join(state.get("evidence_text") or []),
+        "evidence_by_event": dict(state.get("evidence_by_event") or {}),
     }

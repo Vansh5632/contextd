@@ -161,6 +161,51 @@ def test_a_longer_accepted_sentence_does_not_explain_the_shorter_atom() -> None:
     assert accepted[0]["reason"] == "lexical_pass"
 
 
+def test_a_non_abstaining_label_needs_a_quote() -> None:
+    class Empty:
+        def classify(self, request: ShadowRequest) -> ShadowVerdict:
+            del request
+            return ShadowVerdict("SUPPORTED", "")
+
+    request = ShadowRequest(
+        claim_text="retry_count increments before open_socket",
+        evidence_text=LISTING,
+        evidence_ids=("shell-1",),
+        deterministic_outcome="accepted",
+        deterministic_reason="lexical_pass",
+        stage="admit",
+    )
+    verdict = run_shadow(Empty(), [request])[0]
+    assert verdict.label == "INSUFFICIENT_EVIDENCE"
+    assert verdict.evidence_quote == ""
+    assert verdict.writes_memory is False
+
+
+def test_an_accepted_trace_explains_the_atom_ahead_of_a_duplicate_skip() -> None:
+    text = "retry_count increments before open_socket"
+    from harness.diagnostics import match_trace
+
+    chosen = match_trace(
+        text,
+        [
+            {
+                "stage": "admit",
+                "text": text,
+                "outcome": "accepted",
+                "reason": "lexical_pass",
+            },
+            {
+                "stage": "admit",
+                "text": text,
+                "outcome": "skipped",
+                "reason": "duplicate",
+            },
+        ],
+    )
+    assert chosen is not None
+    assert chosen["outcome"] == "accepted"
+
+
 def test_shadow_quote_must_come_from_the_evidence() -> None:
     class Invents:
         def classify(self, request: ShadowRequest) -> ShadowVerdict:
@@ -193,9 +238,21 @@ def test_cited_shadow_label_does_not_become_admission() -> None:
             "outcome": "accepted",
             "reason": "lexical_pass",
             "relation": "supported",
-        }
+            "support_event_id": "shell-1",
+        },
+        {
+            "stage": "admit",
+            "text": "retry_count never increments before open_socket",
+            "outcome": "skipped",
+            "reason": "duplicate",
+            "relation": "not_applicable",
+        },
     ]
-    requests = shadow_requests(traces, LISTING, ["shell-1"])
+    requests = shadow_requests(traces, {"shell-1": LISTING, "shell-2": "unrelated tool output"})
+    assert len(requests) == 1
+    assert requests[0].deterministic_outcome == "accepted"
+    assert requests[0].evidence_text == LISTING
+    assert requests[0].evidence_ids == ("shell-1",)
     verdict = run_shadow(CitesListing(), requests)[0]
     assert verdict.label == "CONTRADICTED"
     assert verdict.evidence_quote == "self.retry_count += 1"
