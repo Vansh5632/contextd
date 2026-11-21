@@ -121,11 +121,29 @@ impl Draft {
     }
 }
 
+/// One deterministic decision. Recording this does not admit or reject a claim.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DecisionTrace {
+    /// `keep_clause`, `apply_extraction`, or `admit`.
+    pub stage: &'static str,
+    pub text: String,
+    /// `kept`, `dropped`, `extracted`, `skipped`, `accepted`, or `rejected`.
+    pub outcome: &'static str,
+    /// `lexical_pass`, `polarity`, `order`, `residue`, `unanchored`,
+    /// `low_overlap`, `empty_support`, `hedge`, `speech_act`, or a gate code.
+    pub reason: &'static str,
+    /// `supported`, `contradicted`, `insufficient`, or `not_applicable`.
+    pub relation: &'static str,
+}
+
 #[derive(Debug, Default, serde::Serialize)]
 pub struct HandoffReport {
     pub accepted: Vec<Value>,
     pub rejected: Vec<Value>,
     pub skipped: Vec<Value>,
+    /// Clause and gate reasons. Empty on a handoff that found no notes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<DecisionTrace>,
 }
 
 /// One coding-agent observation, already given an id by the daemon.
@@ -235,9 +253,18 @@ pub fn admit_candidates(log: &mut Vec<RawEvent>, candidates: Vec<Candidate>) -> 
     let mut report = HandoffReport::default();
     let mut seen = seed_seen(log);
     let mut projection = fold(log);
+    let mut diagnostics = Vec::new();
     for candidate in candidates {
-        accept_or_record(log, &candidate, &mut projection, &mut seen, &mut report);
+        accept_or_record(
+            log,
+            &candidate,
+            &mut projection,
+            &mut seen,
+            &mut report,
+            &mut diagnostics,
+        );
     }
+    report.diagnostics = diagnostics;
     report
 }
 
@@ -251,6 +278,7 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
     let mut seen = seed_seen(&log[..original_len]);
     let mut projection = fold(log);
     let mut report = HandoffReport::default();
+    let mut diagnostics = Vec::new();
 
     for index in 0..original_len {
         let event = log[index].clone();
@@ -262,20 +290,51 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
         }
         let text = payload_str(&event, "text").trim().to_string();
         if text.is_empty() {
+            trace(
+                &mut diagnostics,
+                "apply_extraction",
+                &text,
+                "skipped",
+                "empty_note",
+                "not_applicable",
+            );
             skip(&mut report, &event.id, "empty note");
             continue;
         }
         let role = payload_str(&event, "role");
         if role == "retract" || starts_word(&text.to_lowercase(), "retract") {
-            retract_note(log, &event, &text, &mut projection, &mut report);
+            retract_note(
+                log,
+                &event,
+                &text,
+                &mut projection,
+                &mut report,
+                &mut diagnostics,
+            );
             continue;
         }
         if role == "update" {
-            update_note(log, &event, &text, &mut projection, &mut seen, &mut report);
+            update_note(
+                log,
+                &event,
+                &text,
+                &mut projection,
+                &mut seen,
+                &mut report,
+                &mut diagnostics,
+            );
             continue;
         }
 
         let Some(task_event) = note_task(log, &event) else {
+            trace(
+                &mut diagnostics,
+                "apply_extraction",
+                &text,
+                "skipped",
+                "not_failing",
+                "not_applicable",
+            );
             skip(
                 &mut report,
                 &event.id,
@@ -285,17 +344,31 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
         };
         let task = task_for(task_event);
         let support = support_event(log, &event, index).cloned();
-        let drafts = drafts_for_note(&event, &text, support.as_ref(), &task);
+        let drafts = drafts_for_note(&event, &text, support.as_ref(), &task, &mut diagnostics);
         if drafts.is_empty() {
-            skip(
-                &mut report,
-                &event.id,
-                &skip_reason(&text, support.as_ref()),
+            let reason_text = skip_reason(&text, support.as_ref());
+            let code = note_skip_code(&text, support.as_ref(), &reason_text);
+            trace(
+                &mut diagnostics,
+                "apply_extraction",
+                &text,
+                "skipped",
+                code,
+                relation_for_reason(code),
             );
+            skip(&mut report, &event.id, &reason_text);
             continue;
         }
         for draft in drafts {
             if !draft.source_text.contains(&draft.text) || draft.text.is_empty() {
+                trace(
+                    &mut diagnostics,
+                    "apply_extraction",
+                    &draft.text,
+                    "skipped",
+                    "not_verbatim",
+                    "not_applicable",
+                );
                 skip(
                     &mut report,
                     &event.id,
@@ -304,6 +377,14 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
                 continue;
             }
             if !(1..=MAX_TEXT).contains(&draft.text.chars().count()) {
+                trace(
+                    &mut diagnostics,
+                    "apply_extraction",
+                    &draft.text,
+                    "skipped",
+                    "overlong",
+                    "not_applicable",
+                );
                 skip(
                     &mut report,
                     &event.id,
@@ -312,27 +393,65 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
                 continue;
             }
             if draft.kind == "reality" {
-                let relation =
-                    evidence_relation(&draft.text, draft.support_text.as_deref().unwrap_or(""));
+                let (reason, relation) =
+                    relation_decision(&draft.text, draft.support_text.as_deref().unwrap_or(""));
                 if relation != EvidenceRelation::Supported {
+                    trace(
+                        &mut diagnostics,
+                        "apply_extraction",
+                        &draft.text,
+                        "skipped",
+                        reason,
+                        relation_label(relation),
+                    );
                     skip(&mut report, &event.id, evidence_skip_reason(relation));
                     continue;
                 }
+                trace(
+                    &mut diagnostics,
+                    "apply_extraction",
+                    &draft.text,
+                    "extracted",
+                    reason,
+                    "supported",
+                );
+            } else {
+                trace(
+                    &mut diagnostics,
+                    "apply_extraction",
+                    &draft.text,
+                    "extracted",
+                    draft_reason(&draft),
+                    "not_applicable",
+                );
             }
-            let draft = demote_if_conflict(log, draft, &mut projection, &mut seen, &mut report);
+            let draft = demote_if_conflict(
+                log,
+                draft,
+                &mut projection,
+                &mut seen,
+                &mut report,
+                &mut diagnostics,
+            );
             accept_or_record(
                 log,
                 &draft.candidate(),
                 &mut projection,
                 &mut seen,
                 &mut report,
+                &mut diagnostics,
             );
         }
     }
+    report.diagnostics = diagnostics;
     report
 }
 
 /// Read the daemon log, admit new claims, and rebuild the projection.
+///
+/// This holds the caller's SQLite connection. Shadow classification is not
+/// invoked here; [`crate::shadow::run_shadow`] takes no connection and must
+/// run before the writer lock is taken.
 pub fn run_handoff(conn: &Connection) -> rusqlite::Result<HandoffReport> {
     let mut events = store::db::get_handoff_events(conn)?;
     if !events.iter().any(|event| event.source == EventSource::Note) {
@@ -361,6 +480,7 @@ fn accept_or_record(
     projection: &mut Projection,
     seen: &mut Vec<(String, String)>,
     report: &mut HandoffReport,
+    diagnostics: &mut Vec<DecisionTrace>,
 ) {
     match admit(candidate, projection, seen, log) {
         Ok(event) => {
@@ -370,6 +490,18 @@ fn accept_or_record(
             ));
             push_event(log, event, format!("c2_{}", candidate.claim_id));
             *projection = fold(log);
+            trace(
+                diagnostics,
+                "admit",
+                &candidate.text,
+                "accepted",
+                admission_reason(candidate, log),
+                if candidate.kind == "reality" {
+                    "supported"
+                } else {
+                    "not_applicable"
+                },
+            );
             report.accepted.push(json!({
                 "claim_id": candidate.claim_id,
                 "kind": candidate.kind,
@@ -379,13 +511,31 @@ fn accept_or_record(
                 "evidence_ids": candidate.evidence_ids,
             }));
         }
-        Err(reason) if reason.contains("duplicate") => {
-            skip(report, &candidate.claim_id, &reason);
+        Err(error) if error.message.contains("duplicate") => {
+            trace(
+                diagnostics,
+                "admit",
+                &candidate.text,
+                "skipped",
+                "duplicate",
+                "not_applicable",
+            );
+            skip(report, &candidate.claim_id, &error.message);
         }
-        Err(reason) => report.rejected.push(json!({
-            "claim_id": candidate.claim_id,
-            "reason": reason,
-        })),
+        Err(error) => {
+            trace(
+                diagnostics,
+                "admit",
+                &candidate.text,
+                "rejected",
+                error.reason,
+                relation_for_reason(error.reason),
+            );
+            report.rejected.push(json!({
+                "claim_id": candidate.claim_id,
+                "reason": error.message,
+            }));
+        }
     }
 }
 
@@ -395,12 +545,29 @@ fn retract_note(
     text: &str,
     projection: &mut Projection,
     report: &mut HandoffReport,
+    diagnostics: &mut Vec<DecisionTrace>,
 ) {
     let Some(target) = longest_quoted_claim(projection, text) else {
+        trace(
+            diagnostics,
+            "apply_extraction",
+            text,
+            "skipped",
+            "retract_miss",
+            "not_applicable",
+        );
         skip(report, &note.id, "retract does not quote a current claim");
         return;
     };
     if target.origin == ClaimOrigin::Projector || target.confidence == ClaimConfidence::Observed {
+        trace(
+            diagnostics,
+            "apply_extraction",
+            text,
+            "skipped",
+            "observed_reality",
+            "not_applicable",
+        );
         skip(report, &note.id, "cannot retract an observed reality");
         return;
     }
@@ -429,12 +596,28 @@ fn retract_note(
             validate_against_projection(origin, &event, projection).map_err(|err| err.to_string())
         })
     {
+        trace(
+            diagnostics,
+            "admit",
+            text,
+            "rejected",
+            "validation",
+            "not_applicable",
+        );
         skip(report, &note.id, &err);
         return;
     }
     let target_id = target.id.clone();
     push_event(log, event, format!("c2_retract_{}", note.id));
     *projection = fold(log);
+    trace(
+        diagnostics,
+        "admit",
+        text,
+        "accepted",
+        "retract",
+        "not_applicable",
+    );
     report.accepted.push(json!({
         "claim_id": format!("retract_{}", note.id),
         "kind": "retract",
@@ -450,6 +633,7 @@ fn update_note(
     projection: &mut Projection,
     seen: &mut Vec<(String, String)>,
     report: &mut HandoffReport,
+    diagnostics: &mut Vec<DecisionTrace>,
 ) {
     let replaces = payload_str(note, "replaces_text");
     let Some(target) = current_with_text(projection, &replaces) else {
@@ -474,8 +658,16 @@ fn update_note(
     if let Some(object) = forced.payload.as_object_mut() {
         object.insert("role".into(), json!("conclusion"));
     }
-    let drafts = natural_drafts(&forced, text, support, &task);
+    let drafts = natural_drafts(&forced, text, support, &task, diagnostics);
     if drafts.is_empty() {
+        trace(
+            diagnostics,
+            "apply_extraction",
+            text,
+            "skipped",
+            "ungrounded",
+            "insufficient",
+        );
         skip(report, &note.id, "update is not a grounded claim");
         return;
     }
@@ -487,8 +679,16 @@ fn update_note(
                 scratch_seen.push((draft.kind.clone(), collapse(&draft.text).to_lowercase()));
                 admitted.push(draft.clone());
             }
-            Err(reason) => {
-                skip(report, &note.id, &reason);
+            Err(error) => {
+                trace(
+                    diagnostics,
+                    "apply_extraction",
+                    text,
+                    "skipped",
+                    error.reason,
+                    relation_for_reason(error.reason),
+                );
+                skip(report, &note.id, &error.message);
                 return;
             }
         }
@@ -524,7 +724,26 @@ fn update_note(
     push_event(log, retract, format!("c2_retract_{}", note.id));
     *projection = fold(log);
     for draft in admitted {
-        accept_or_record(log, &draft.candidate(), projection, seen, report);
+        accept_or_record(
+            log,
+            &draft.candidate(),
+            projection,
+            seen,
+            report,
+            diagnostics,
+        );
+    }
+}
+
+struct AdmitError {
+    reason: &'static str,
+    message: String,
+}
+
+fn gate(reason: &'static str, message: impl Into<String>) -> AdmitError {
+    AdmitError {
+        reason,
+        message: message.into(),
     }
 }
 
@@ -533,48 +752,67 @@ fn admit(
     projection: &Projection,
     seen: &[(String, String)],
     events: &[RawEvent],
-) -> Result<ClaimEvent, String> {
+) -> Result<ClaimEvent, AdmitError> {
     let origin = ClaimOrigin::parse(&candidate.origin)
-        .ok_or_else(|| format!("unknown origin {}", candidate.origin))?;
+        .ok_or_else(|| gate("validation", format!("unknown origin {}", candidate.origin)))?;
     if origin == ClaimOrigin::Projector {
-        return Err("projector claims are derived from the log, not extracted".into());
+        return Err(gate(
+            "projector",
+            "projector claims are derived from the log, not extracted",
+        ));
     }
     let kind = ClaimKind::parse(&candidate.kind)
-        .ok_or_else(|| format!("unknown kind {}", candidate.kind))?;
-    let confidence = ClaimConfidence::parse(&candidate.confidence)
-        .ok_or_else(|| format!("unknown confidence {}", candidate.confidence))?;
+        .ok_or_else(|| gate("validation", format!("unknown kind {}", candidate.kind)))?;
+    let confidence = ClaimConfidence::parse(&candidate.confidence).ok_or_else(|| {
+        gate(
+            "validation",
+            format!("unknown confidence {}", candidate.confidence),
+        )
+    })?;
     let text = candidate.text.trim();
     if candidate.evidence_ids.is_empty() {
-        return Err("claim has no evidence id".into());
+        return Err(gate("no_evidence", "claim has no evidence id"));
     }
     for id in &candidate.evidence_ids {
         if event_by_id(events, id).is_none() {
-            return Err(format!("evidence id {id} is not in the event log"));
+            return Err(gate(
+                "missing_evidence",
+                format!("evidence id {id} is not in the event log"),
+            ));
         }
     }
     let note = event_by_id(events, &candidate.evidence_ids[0])
         .filter(|event| event.source == EventSource::Note)
-        .ok_or_else(|| "first evidence id is not a note".to_string())?;
+        .ok_or_else(|| gate("not_a_note", "first evidence id is not a note"))?;
     let note_text = payload_str(note, "text");
     if text.is_empty() || !note_text.contains(text) || candidate.source_text != note_text {
-        return Err("claim text is not a verbatim span of the source note".into());
+        return Err(gate(
+            "not_verbatim",
+            "claim text is not a verbatim span of the source note",
+        ));
     }
     if candidate.task_subject.trim().is_empty() {
-        return Err("claim has no task subject".into());
+        return Err(gate("no_task", "claim has no task subject"));
     }
     if !failing_subjects(events).contains(candidate.task_subject.trim()) {
-        return Err("claim is not attached to a command that is still failing".into());
+        return Err(gate(
+            "not_failing",
+            "claim is not attached to a command that is still failing",
+        ));
     }
     let key = (candidate.kind.clone(), collapse(text).to_lowercase());
     if seen.iter().any(|item| item == &key) {
-        return Err("duplicate of a claim already admitted".into());
+        return Err(gate("duplicate", "duplicate of a claim already admitted"));
     }
     if kind == ClaimKind::Reality {
         let support_event = candidate.evidence_ids.iter().find_map(|id| {
             event_by_id(events, id).filter(|event| event.source == EventSource::Shell)
         });
         let Some(support_event) = support_event else {
-            return Err("inferred reality does not cite a shell event".into());
+            return Err(gate(
+                "no_shell_evidence",
+                "inferred reality does not cite a shell event",
+            ));
         };
         let output = payload_str(support_event, "output");
         if candidate
@@ -582,19 +820,28 @@ fn admit(
             .as_deref()
             .is_some_and(|support| support != output)
         {
-            return Err("support text does not match the cited shell output".into());
+            return Err(gate(
+                "support_mismatch",
+                "support text does not match the cited shell output",
+            ));
         }
-        let relation = evidence_relation(text, &output);
+        let (reason, relation) = relation_decision(text, &output);
         if relation != EvidenceRelation::Supported {
-            return Err(evidence_skip_reason(relation).into());
+            return Err(gate(reason, evidence_skip_reason(relation)));
         }
     }
     if confidence == ClaimConfidence::Observed {
-        return Err("an extracted claim cannot be marked observed".into());
+        return Err(gate(
+            "observed_forbidden",
+            "an extracted claim cannot be marked observed",
+        ));
     }
     let subject = if kind == ClaimKind::NextAction {
         if candidate.subject.as_deref() != Some(FRONTIER_SUBJECT) {
-            return Err("a next action must use the frontier subject".into());
+            return Err(gate(
+                "validation",
+                "a next action must use the frontier subject",
+            ));
         }
         FRONTIER_SUBJECT.to_string()
     } else {
@@ -618,8 +865,9 @@ fn admit(
         evidence_ids: candidate.evidence_ids.clone(),
         supersedes: None,
     };
-    validate(origin, &event).map_err(|err| err.to_string())?;
-    validate_against_projection(origin, &event, projection).map_err(|err| err.to_string())?;
+    validate(origin, &event).map_err(|err| gate("validation", err.to_string()))?;
+    validate_against_projection(origin, &event, projection)
+        .map_err(|err| gate("validation", err.to_string()))?;
     Ok(event)
 }
 
@@ -628,6 +876,7 @@ fn drafts_for_note(
     text: &str,
     support: Option<&RawEvent>,
     task: &str,
+    diagnostics: &mut Vec<DecisionTrace>,
 ) -> Vec<Draft> {
     if has_word(text, "constraint") {
         let mut drafts = Vec::new();
@@ -708,12 +957,12 @@ fn drafts_for_note(
         }
     }
     if payload_str(note, "role") == "conclusion" {
-        return natural_drafts(note, text, support, task);
+        return natural_drafts(note, text, support, task, diagnostics);
     }
     if is_source_read(support)
         && let Some(output) = support.map(|event| payload_str(event, "output"))
     {
-        let drafts = span_drafts(note, text, &output, task, support);
+        let drafts = span_drafts(note, text, &output, task, support, diagnostics);
         if !drafts.is_empty() {
             return drafts;
         }
@@ -746,6 +995,7 @@ fn natural_drafts(
     text: &str,
     support: Option<&RawEvent>,
     task: &str,
+    diagnostics: &mut Vec<DecisionTrace>,
 ) -> Vec<Draft> {
     let output = support
         .filter(|event| event.source == EventSource::Shell)
@@ -770,7 +1020,10 @@ fn natural_drafts(
             ));
             continue;
         }
-        for (span_index, span) in kept_texts(sentence, &output).into_iter().enumerate() {
+        for (span_index, span) in kept_texts(sentence, &output, diagnostics)
+            .into_iter()
+            .enumerate()
+        {
             let Some(kind) = classify_span(&span) else {
                 continue;
             };
@@ -823,10 +1076,14 @@ fn span_drafts(
     output: &str,
     task: &str,
     support: Option<&RawEvent>,
+    diagnostics: &mut Vec<DecisionTrace>,
 ) -> Vec<Draft> {
     let mut drafts = Vec::new();
     for (index, sentence) in sentences(text).into_iter().enumerate() {
-        for (span_index, span) in kept_texts(sentence, output).into_iter().enumerate() {
+        for (span_index, span) in kept_texts(sentence, output, diagnostics)
+            .into_iter()
+            .enumerate()
+        {
             let Some(kind) = classify_span(&span) else {
                 continue;
             };
@@ -1359,35 +1616,69 @@ fn next_action(sentence: &str) -> bool {
 /// denial has to agree with an increment, and "before" / "after" have to agree
 /// with the order of those identifiers. A larger overlap is not a stronger claim.
 fn evidence_relation(sentence: &str, support: &str) -> EvidenceRelation {
-    if support.trim().is_empty() {
-        return EvidenceRelation::Insufficient;
-    }
-    if polarity_contradiction(sentence, support) || order_contradiction(sentence, support) {
-        return EvidenceRelation::Contradicted;
-    }
-    if clause_unanchored(sentence, support)
-        || residue_unsupported(sentence, support)
-        || content_overlap(sentence, support) < MIN_OVERLAP
-    {
-        return EvidenceRelation::Insufficient;
-    }
-    EvidenceRelation::Supported
+    relation_decision(sentence, support).1
 }
 
-fn kept_texts(sentence: &str, support: &str) -> Vec<String> {
-    if hedge(sentence)
-        && evidence_clauses(sentence)
-            .iter()
-            .all(|clause| hedge(clause))
-    {
+/// The same branches as [`evidence_relation`], named.
+///
+/// Polarity is tested before order because the boolean check is
+/// `polarity_contradiction || order_contradiction`.
+fn relation_decision(sentence: &str, support: &str) -> (&'static str, EvidenceRelation) {
+    if support.trim().is_empty() {
+        return ("empty_support", EvidenceRelation::Insufficient);
+    }
+    if polarity_contradiction(sentence, support) {
+        return ("polarity", EvidenceRelation::Contradicted);
+    }
+    if order_contradiction(sentence, support) {
+        return ("order", EvidenceRelation::Contradicted);
+    }
+    if clause_unanchored(sentence, support) {
+        return ("unanchored", EvidenceRelation::Insufficient);
+    }
+    if residue_unsupported(sentence, support) {
+        return ("residue", EvidenceRelation::Insufficient);
+    }
+    if content_overlap(sentence, support) < MIN_OVERLAP {
+        return ("low_overlap", EvidenceRelation::Insufficient);
+    }
+    ("lexical_pass", EvidenceRelation::Supported)
+}
+
+fn kept_texts(sentence: &str, support: &str, diagnostics: &mut Vec<DecisionTrace>) -> Vec<String> {
+    let clauses = evidence_clauses(sentence);
+    if hedge(sentence) && clauses.iter().all(|clause| hedge(clause)) {
+        for clause in &clauses {
+            trace(
+                diagnostics,
+                "keep_clause",
+                clause,
+                "kept",
+                "hedge",
+                "not_applicable",
+            );
+        }
         return vec![sentence.to_string()];
     }
-    let clauses = evidence_clauses(sentence);
-    let kept: Vec<String> = clauses
-        .iter()
-        .filter(|clause| keep_clause(clause, sentence, support))
-        .cloned()
-        .collect();
+    let mut kept = Vec::new();
+    for clause in &clauses {
+        let (reason, keep) = clause_decision(clause, sentence, support);
+        trace(
+            diagnostics,
+            "keep_clause",
+            clause,
+            if keep { "kept" } else { "dropped" },
+            reason,
+            if reason == "hedge" {
+                "not_applicable"
+            } else {
+                relation_for_reason(reason)
+            },
+        );
+        if keep {
+            kept.push(clause.clone());
+        }
+    }
     if kept.is_empty() {
         return Vec::new();
     }
@@ -1400,24 +1691,134 @@ fn kept_texts(sentence: &str, support: &str) -> Vec<String> {
     }
 }
 
-fn keep_clause(clause: &str, sentence: &str, support: &str) -> bool {
+/// Clause keep/drop, with the reason for that branch.
+///
+/// Order is tested before polarity, matching the previous
+/// `order_contradiction || polarity_contradiction` check. A hedge is kept
+/// before support is consulted.
+fn clause_decision(clause: &str, sentence: &str, support: &str) -> (&'static str, bool) {
     if hedge(clause) {
-        return true;
+        return ("hedge", true);
     }
-    if support.trim().is_empty() || clause_contradicted(clause, sentence, support) {
-        return false;
+    if support.trim().is_empty() {
+        return ("empty_support", false);
     }
-    if clause_has_residue(clause, support) || content_overlap(clause, support) < 1 {
-        return false;
+    if let Some(reason) = contradiction_reason(clause, sentence, support) {
+        return (reason, false);
     }
-    content_overlap(sentence, support) >= MIN_OVERLAP
+    if clause_has_residue(clause, support) {
+        return ("residue", false);
+    }
+    if content_overlap(clause, support) < 1 {
+        return ("unanchored", false);
+    }
+    if content_overlap(sentence, support) < MIN_OVERLAP {
+        return ("low_overlap", false);
+    }
+    ("lexical_pass", true)
 }
 
-fn clause_contradicted(clause: &str, sentence: &str, support: &str) -> bool {
-    if order_contradiction(clause, support) || polarity_contradiction(clause, support) {
-        return true;
+fn contradiction_reason(clause: &str, sentence: &str, support: &str) -> Option<&'static str> {
+    if order_contradiction(clause, support) {
+        return Some("order");
     }
-    denies_update(clause) && sentence_names_increment(sentence, support)
+    if polarity_contradiction(clause, support) {
+        return Some("polarity");
+    }
+    if denies_update(clause) && sentence_names_increment(sentence, support) {
+        return Some("polarity");
+    }
+    None
+}
+
+fn trace(
+    diagnostics: &mut Vec<DecisionTrace>,
+    stage: &'static str,
+    text: &str,
+    outcome: &'static str,
+    reason: &'static str,
+    relation: &'static str,
+) {
+    diagnostics.push(DecisionTrace {
+        stage,
+        text: text.trim().to_string(),
+        outcome,
+        reason,
+        relation,
+    });
+}
+
+fn relation_label(relation: EvidenceRelation) -> &'static str {
+    match relation {
+        EvidenceRelation::Supported => "supported",
+        EvidenceRelation::Contradicted => "contradicted",
+        EvidenceRelation::Insufficient => "insufficient",
+    }
+}
+
+fn relation_for_reason(reason: &str) -> &'static str {
+    match reason {
+        "lexical_pass" => "supported",
+        "polarity" | "order" => "contradicted",
+        "residue" | "unanchored" | "low_overlap" | "empty_support" => "insufficient",
+        _ => "not_applicable",
+    }
+}
+
+fn draft_reason(draft: &Draft) -> &'static str {
+    if hedge(&draft.text) {
+        "hedge"
+    } else if draft.kind == "next_action" {
+        "next_action"
+    } else {
+        "speech_act"
+    }
+}
+
+fn admission_reason(candidate: &Candidate, events: &[RawEvent]) -> &'static str {
+    if hedge(&candidate.text) {
+        return "hedge";
+    }
+    if candidate.kind == "reality" {
+        let output = candidate.support_text.clone().unwrap_or_else(|| {
+            candidate
+                .evidence_ids
+                .iter()
+                .find_map(|id| {
+                    event_by_id(events, id)
+                        .filter(|event| event.source == EventSource::Shell)
+                        .map(|event| payload_str(event, "output"))
+                })
+                .unwrap_or_default()
+        });
+        return relation_decision(&candidate.text, &output).0;
+    }
+    if candidate.kind == "next_action" {
+        return "next_action";
+    }
+    "speech_act"
+}
+
+fn note_skip_code(text: &str, support: Option<&RawEvent>, fallback: &str) -> &'static str {
+    if let Some(event) = support.filter(|event| event.source == EventSource::Shell) {
+        let (reason, relation) = relation_decision(text, &payload_str(event, "output"));
+        if relation != EvidenceRelation::Supported {
+            return reason;
+        }
+    }
+    if fallback.contains("open hypothesis") {
+        "open_hypothesis"
+    } else if fallback.contains("no load-bearing") {
+        "no_speech_act"
+    } else if fallback.contains("not grounded") {
+        "ungrounded"
+    } else if fallback.contains("still failing") {
+        "not_failing"
+    } else if fallback.contains("empty") {
+        "empty_note"
+    } else {
+        "ungrounded"
+    }
 }
 
 fn sentence_names_increment(sentence: &str, support: &str) -> bool {
@@ -1667,6 +2068,7 @@ fn demote_if_conflict(
     projection: &mut Projection,
     seen: &mut Vec<(String, String)>,
     report: &mut HandoffReport,
+    diagnostics: &mut Vec<DecisionTrace>,
 ) -> Draft {
     let conflicts = conflicting_current(projection, &draft);
     if conflicts.is_empty() {
@@ -1686,6 +2088,7 @@ fn demote_if_conflict(
             projection,
             seen,
             report,
+            diagnostics,
         );
     }
     draft.kind = "unknown".into();
@@ -1696,6 +2099,7 @@ fn demote_if_conflict(
     draft
 }
 
+#[allow(clippy::too_many_arguments)]
 fn demote_claim(
     log: &mut Vec<RawEvent>,
     target: &Claim,
@@ -1704,6 +2108,7 @@ fn demote_claim(
     projection: &mut Projection,
     seen: &mut Vec<(String, String)>,
     report: &mut HandoffReport,
+    diagnostics: &mut Vec<DecisionTrace>,
 ) {
     let Some(source) = target
         .evidence_ids
@@ -1759,7 +2164,7 @@ fn demote_claim(
         support_text: None,
         task_subject: task_subject.to_string(),
     };
-    accept_or_record(log, &uncertain, projection, seen, report);
+    accept_or_record(log, &uncertain, projection, seen, report, diagnostics);
 }
 
 fn content_overlap(claim: &str, support: &str) -> usize {
@@ -2541,5 +2946,148 @@ mod tests {
             assert!(fold_sources_ok);
         });
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn stage_reason<'a>(
+        report: &'a HandoffReport,
+        stage: &str,
+        reason: &str,
+    ) -> Option<&'a DecisionTrace> {
+        report
+            .diagnostics
+            .iter()
+            .find(|row| row.stage == stage && row.reason == reason)
+    }
+
+    #[test]
+    fn diagnostics_name_the_clause_reason_without_changing_admission() {
+        let output =
+            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+        let false_sentence = "The retry_count database pool is exhausted.";
+        let mut false_events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, false_sentence, "g"),
+        ];
+        let false_report = apply_extraction(&mut false_events);
+        assert!(
+            texts_of(&false_report)
+                .iter()
+                .all(|text| !text.contains("database")),
+            "{:?}",
+            false_report.accepted
+        );
+        let residue = stage_reason(&false_report, "keep_clause", "residue")
+            .expect("a dropped clause records residue");
+        assert_eq!(residue.outcome, "dropped");
+        assert!(residue.text.contains("database"), "{}", residue.text);
+        assert!(
+            false_report.diagnostics.iter().any(|row| {
+                row.stage == "apply_extraction"
+                    && row.outcome == "skipped"
+                    && row.reason == "residue"
+            }),
+            "{:?}",
+            false_report.diagnostics
+        );
+        assert!(
+            false_report
+                .diagnostics
+                .iter()
+                .all(|row| row.outcome != "accepted"),
+            "a residue failure must not be accepted: {:?}",
+            false_report.diagnostics
+        );
+
+        let true_sentence = "retry_count increments before open_socket";
+        let mut true_events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, true_sentence, "g"),
+        ];
+        let true_report = apply_extraction(&mut true_events);
+        assert_eq!(texts_of(&true_report), vec![true_sentence.to_string()]);
+        for stage in ["keep_clause", "apply_extraction", "admit"] {
+            let row = true_report
+                .diagnostics
+                .iter()
+                .find(|row| row.stage == stage && row.text == true_sentence)
+                .unwrap_or_else(|| panic!("{stage} missing: {:?}", true_report.diagnostics));
+            assert_eq!(row.reason, "lexical_pass", "{stage}");
+        }
+        assert!(true_report.diagnostics.iter().any(|row| {
+            row.stage == "admit" && row.outcome == "accepted" && row.reason == "lexical_pass"
+        }));
+
+        let denial = "The first send is not counted, so retry_count stays at zero.";
+        let mut denial_events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, denial, "g"),
+        ];
+        let denial_report = apply_extraction(&mut denial_events);
+        assert!(
+            texts_of(&denial_report).is_empty(),
+            "{:?}",
+            denial_report.accepted
+        );
+        assert!(
+            denial_report
+                .diagnostics
+                .iter()
+                .any(|row| row.stage == "keep_clause" && row.reason == "polarity"),
+            "{:?}",
+            denial_report.diagnostics
+        );
+
+        let reversed = "open_socket runs before retry_count is incremented.";
+        let mut reversed_events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, reversed, "g"),
+        ];
+        let reversed_report = apply_extraction(&mut reversed_events);
+        assert!(texts_of(&reversed_report).is_empty());
+        assert!(
+            reversed_report
+                .diagnostics
+                .iter()
+                .any(|row| row.reason == "order" && row.outcome != "accepted"),
+            "{:?}",
+            reversed_report.diagnostics
+        );
+    }
+
+    #[test]
+    fn shadow_classification_does_not_change_admitted_claims() {
+        let output =
+            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+        let sentence = "retry_count never increments before open_socket";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, sentence, "g"),
+        ];
+        let report = apply_extraction(&mut events);
+        assert_eq!(texts_of(&report), vec![sentence.to_string()]);
+        let before_ids: Vec<String> = events.iter().map(|event| event.id.clone()).collect();
+        let before_fold = fold(&events);
+        let requests = crate::shadow::shadow_requests(&report.diagnostics, output, &["g".into()]);
+        let verdicts = crate::shadow::run_shadow(&crate::shadow::AbstainingShadow, &requests);
+        let after_ids: Vec<String> = events.iter().map(|event| event.id.clone()).collect();
+        assert_eq!(after_ids, before_ids);
+        assert_eq!(fold(&events), before_fold);
+        assert!(verdicts.iter().all(|verdict| !verdict.writes_memory));
+        assert!(requests.iter().any(|request| {
+            request.claim_text == sentence
+                && request.stage == "admit"
+                && request.deterministic_outcome == "accepted"
+                && request.deterministic_reason == "lexical_pass"
+        }));
+        assert!(
+            verdicts.iter().any(|verdict| {
+                verdict.label == crate::shadow::ShadowLabel::InsufficientEvidence
+            })
+        );
     }
 }

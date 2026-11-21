@@ -9,6 +9,7 @@ pub mod extract;
 pub mod item;
 pub mod relevance;
 pub mod search;
+pub mod shadow;
 pub mod snapshot;
 
 /// Embed a query string, or return `None` for any reason at all.
