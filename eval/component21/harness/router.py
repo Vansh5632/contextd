@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from harness.atomic import decompose, polarity_conflict
+from harness.shadow_experiment import EXPERIMENT_SUITES
 
 _IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
 _LITERAL_BEFORE = re.compile(
@@ -61,7 +62,7 @@ def apply_routes(
     semantic: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Route a batch. Semantic failures abstain and do not propagate."""
-    kept = [row for row in rows if row.get("suite") not in {"heldout", "continuation"}]
+    kept = [row for row in rows if row.get("suite") in EXPERIMENT_SUITES]
     decisions = [(row, route_claim(str(row.get("claim_text") or ""), str(row.get("evidence_text") or ""))) for row in kept]
     semantic_rows = [row for row, decision in decisions if decision.route == "semantic"]
     semantic_labels: dict[str, dict[str, Any]] = {}
@@ -91,7 +92,7 @@ def apply_routes(
                     "route_reason": decision.reason if produced is not None else semantic_error or "model_unavailable",
                     "impact": "high" if semantic_error else decision.impact,
                     "writes_memory": False,
-                    "llm_calls": 0 if produced is None and semantic_error else _calls(produced),
+                    "llm_calls": _calls(produced),
                 }
             )
             continue
@@ -112,7 +113,9 @@ def apply_routes(
 
 def _calls(produced: dict[str, Any] | None) -> int:
     if not produced:
-        return 1
+        return 0
+    if "llm_calls" in produced:
+        return int(produced.get("llm_calls") or 0)
     return 1 + int(produced.get("rechecked") or 0)
 
 
@@ -121,15 +124,30 @@ def _missing(evidence: str) -> bool:
 
 
 def _conflicting(evidence: str) -> bool:
-    """Same identifier is both incremented and assigned a different number."""
-    updates: dict[str, set[str]] = {}
+    """Two different updates disagree. An initial assignment before the only increment does not."""
+    events: dict[str, list[tuple[int, str]]] = {}
+
+    def record(name: str, index: int, kind: str) -> None:
+        events.setdefault(name.lower(), []).append((index, kind))
+
     for match in re.finditer(rf"({_IDENT})\s*\+=\s*(\d+)", evidence):
-        updates.setdefault(match.group(1).lower(), set()).add(f"+={match.group(2)}")
+        record(match.group(1), match.start(), f"+={match.group(2)}")
     for match in re.finditer(rf"({_IDENT})\s*\+\+", evidence):
-        updates.setdefault(match.group(1).lower(), set()).add("+=1")
+        record(match.group(1), match.start(), "+=1")
     for match in re.finditer(rf"({_IDENT})\s*=\s*(\d+)", evidence):
-        updates.setdefault(match.group(1).lower(), set()).add(f"={match.group(2)}")
-    return any(len(values) > 1 for values in updates.values())
+        record(match.group(1), match.start(), f"={match.group(2)}")
+    for writes in events.values():
+        writes.sort()
+        adds = [kind for _, kind in writes if kind.startswith("+=")]
+        sets = [kind for _, kind in writes if kind.startswith("=") and not kind.startswith("+=")]
+        if len(set(adds)) > 1 or len(set(sets)) > 1:
+            return True
+        if not adds or not sets:
+            continue
+        first_add = min(index for index, kind in writes if kind.startswith("+="))
+        if any(index > first_add for index, kind in writes if kind.startswith("=") and not kind.startswith("+=")):
+            return True
+    return False
 
 
 def _atom_decision(atom: str, evidence: str, *, primary: bool) -> tuple[str | None, str]:
@@ -164,6 +182,10 @@ def _shown_amount(ident: str, evidence: str) -> int | None:
     return 1 if match.group(2) is None else int(match.group(2))
 
 
+_BRANCH = re.compile(r"\b(?:if|else|elif|switch|case|match)\b")
+_FUNCTION = re.compile(r"(?m)^[ \t]*(?:async[ \t]+def|def|fn|func|function)\b")
+
+
 def _order(left: str, right: str, evidence: str) -> str | None:
     increment = re.search(
         rf"(?i)(?<![A-Za-z0-9_]){re.escape(left)}\s*(?:\+=\s*\d+|\+\+)",
@@ -172,9 +194,25 @@ def _order(left: str, right: str, evidence: str) -> str | None:
     call = re.search(rf"(?i)(?<![A-Za-z0-9_]){re.escape(right)}\s*\(", evidence)
     if increment is None or call is None:
         return None
+    if not _shared_straight_line(evidence, increment.start(), call.start()):
+        return None
     if call.start() < increment.start():
         return "reversed"
     return "before"
+
+
+def _shared_straight_line(evidence: str, left: int, right: int) -> bool:
+    """Text order is execution order only inside one straight-line block."""
+    start, end = sorted((left, right))
+    span = evidence[start:end]
+    if _FUNCTION.search(span) or _BRANCH.search(span):
+        return False
+    return _brace_depth(evidence, start) == _brace_depth(evidence, end)
+
+
+def _brace_depth(text: str, index: int) -> int:
+    snippet = text[:index]
+    return snippet.count("{") - snippet.count("}")
 
 
 def _call_quote(ident: str, evidence: str) -> str:
@@ -214,16 +252,21 @@ def _load_rows(path: str) -> list[dict[str, Any]]:
 
     document = json.loads(open(path, encoding="utf-8").read())
     rows = document.get("predictions") or document.get("candidates") or []
-    return [row for row in rows if row.get("suite") not in {"heldout", "continuation"} and row.get("claim_text")]
+    return [
+        row
+        for row in rows
+        if row.get("suite") in EXPERIMENT_SUITES and row.get("claim_text")
+    ]
 
 
 def main() -> None:
     import argparse
-    import json
     import os
     import sys
     from datetime import datetime, timezone
     from pathlib import Path
+
+    from harness.shadow_experiment import refuse_same_output, settled_by_id, write_json
 
     parser = argparse.ArgumentParser(description="Risk-aware shadow router")
     parser.add_argument("--from-experiment", type=Path, required=True)
@@ -232,6 +275,7 @@ def main() -> None:
     parser.add_argument("--repeat", type=int, default=2)
     parser.add_argument("--i-accept-spend", action="store_true")
     args = parser.parse_args()
+    refuse_same_output(args.from_experiment, args.output)
     rows = _load_rows(str(args.from_experiment))
     from harness.shadow_experiment import score_predictions
 
@@ -256,12 +300,22 @@ def main() -> None:
     }
     if not args.i_accept_spend:
         plan["predictions"] = deterministic
-        args.output.write_text(json.dumps(plan, indent=2) + "\n")
+        write_json(args.output, plan)
         print(f"plan only routes={plan['routes']} authorization=spend_not_authorized")
         return
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
-        raise SystemExit("OPENAI_API_KEY is empty")
+        plan["predictions"] = [
+            row
+            if row["route"] != "semantic"
+            else {**row, "model_label": "INSUFFICIENT_EVIDENCE", "evidence_quote": "", "route": "semantic_failed", "route_reason": "missing_api_key", "llm_calls": 0}
+            for row in deterministic
+        ]
+        plan["model_called"] = False
+        plan["authorization"] = "missing_api_key"
+        write_json(args.output, plan)
+        print(f"abstained reason=missing_api_key wrote {args.output}")
+        return
     from harness.atomic import run_atomic_rows
     from harness.shadow_experiment import estimate_cost
 
@@ -269,10 +323,28 @@ def main() -> None:
     # The deterministic pass stored no model label worth keeping for these rows.
     source = {str(row.get("id")): row for row in rows}
     batch = [source[str(row.get("id"))] for row in semantic_rows]
+    resume = settled_by_id(args.output)
+    plan["settled_semantic"] = dict(resume)
     passes = []
     for index in range(max(1, args.repeat)):
         print(f"semantic pass {index + 1}/{args.repeat} claims={len(batch)}", flush=True)
-        labeled = run_atomic_rows(batch, model=args.model, api_key=api_key) if batch else []
+
+        def checkpoint(result: dict[str, Any]) -> None:
+            plan["settled_semantic"][str(result.get("id"))] = result
+            plan["partial"] = True
+            write_json(args.output, plan)
+
+        labeled = (
+            run_atomic_rows(
+                batch,
+                model=args.model,
+                api_key=api_key,
+                resume=resume if index == 0 else None,
+                on_row=checkpoint if index == 0 else None,
+            )
+            if batch
+            else []
+        )
         by_id = {str(row.get("id")): row for row in labeled}
         merged = []
         for row in deterministic:
@@ -290,7 +362,8 @@ def main() -> None:
                         "evidence_quote": produced.get("evidence_quote") or "",
                         "atoms": produced.get("atoms"),
                         "rechecked": produced.get("rechecked") or 0,
-                        "llm_calls": 1 + int(produced.get("rechecked") or 0),
+                        "llm_calls": int(produced.get("llm_calls") or 0),
+                        "settled": bool(produced.get("settled")),
                         "prompt_tokens": produced.get("prompt_tokens") or 0,
                         "completion_tokens": produced.get("completion_tokens") or 0,
                         "latency_s": produced.get("latency_s") or 0,
@@ -304,7 +377,7 @@ def main() -> None:
     calls = sum(int(row.get("llm_calls") or 0) for run in passes for row in run)
     plan.update(
         {
-            "model_called": True,
+            "model_called": calls > 0,
             "authorization": "i-accept-spend",
             "model": args.model,
             "metrics": score_predictions(passes[0]),
@@ -318,8 +391,9 @@ def main() -> None:
             ],
         }
     )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(plan, indent=2) + "\n")
+    plan.pop("partial", None)
+    plan.pop("settled_semantic", None)
+    write_json(args.output, plan)
     metrics = plan["metrics"]
     print(
         f"false_admission={metrics['false_claim_admission']['numerator']}/{metrics['false_claim_admission']['denominator']} "

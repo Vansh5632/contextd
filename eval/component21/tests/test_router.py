@@ -14,6 +14,7 @@ def test_literal_increment_is_deterministic_support() -> None:
     decision = route_claim("quota_left increases by 1 before release_permit", LISTING)
     assert decision.route == "deterministic"
     assert decision.label == "SUPPORTED"
+    assert decision.evidence_quote
     assert decision.evidence_quote in LISTING
 
 
@@ -25,6 +26,7 @@ def test_rust_and_go_shapes_do_not_need_a_model() -> None:
 def test_reversed_order_and_wrong_amount_are_contradictions() -> None:
     reversed_order = route_claim("quota_left increases by 1 before release_permit", REVERSED)
     assert reversed_order.label == "CONTRADICTED"
+    assert reversed_order.evidence_quote
     assert reversed_order.evidence_quote in REVERSED
     assert route_claim("quota_left increases by 50 before release_permit", LISTING).label == "CONTRADICTED"
     assert route_claim("quota_left never increases before release_permit", LISTING).label == "CONTRADICTED"
@@ -46,6 +48,22 @@ def test_foreign_tail_and_missing_evidence_do_not_call_a_model() -> None:
     assert missing.route == "abstain"
     assert missing.label == "INSUFFICIENT_EVIDENCE"
     assert missing.impact == "high"
+
+
+def test_initialization_before_an_increment_is_not_a_conflict() -> None:
+    evidence = "def release(self, permit):\n    self.quota_left = 0\n    self.quota_left += 1\n    self.release_permit()\n"
+    decision = route_claim("quota_left increases by 1 before release_permit", evidence)
+    assert decision.route == "deterministic"
+    assert decision.label == "SUPPORTED"
+    assert decision.evidence_quote
+
+
+def test_textual_order_outside_one_straight_line_is_not_a_proof() -> None:
+    split = "def bump():\n    quota_left += 1\n\ndef other():\n    release_permit()\n"
+    branched = "def release(self, permit):\n    if permit:\n        self.quota_left += 1\n    else:\n        self.release_permit()\n"
+    claim = "quota_left increases by 1 before release_permit"
+    assert route_claim(claim, split).route == "semantic"
+    assert route_claim(claim, branched).route == "semantic"
 
 
 def test_conflicting_updates_abstain() -> None:
@@ -74,6 +92,19 @@ def test_model_failure_fails_closed_without_raising() -> None:
             "id": "held",
             "suite": "heldout",
             "claim_text": "sealed",
+            "evidence_text": LISTING,
+            "gold": "SUPPORTED",
+        },
+        {
+            "id": "scratch",
+            "suite": "scratch",
+            "claim_text": "not in this experiment",
+            "evidence_text": LISTING,
+            "gold": "SUPPORTED",
+        },
+        {
+            "id": "blank",
+            "claim_text": "missing suite",
             "evidence_text": LISTING,
             "gold": "SUPPORTED",
         },

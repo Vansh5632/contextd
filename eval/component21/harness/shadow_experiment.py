@@ -66,8 +66,28 @@ def assign_owner(row: dict[str, Any]) -> str:
     return "rule"
 
 
+def require_unique_case_ids(cases: list[dict[str, Any]]) -> None:
+    """Refuse a file where one case id is used twice.
+
+    Evidence is stored by case id. A repeated id would attach one suite's tool
+    output, including a held-out listing, to another suite's claim.
+    """
+    seen: dict[Any, str] = {}
+    for case in cases:
+        case_id = case.get("id")
+        suite = str(case.get("suite") or "")
+        previous = seen.get(case_id)
+        if previous is not None:
+            raise ValueError(f"case id {case_id!r} is shared by {previous!r} and {suite!r}")
+        seen[case_id] = suite
+
+
 def select_candidates(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    evidence = {case.get("id"): str(case.get("evidence_text") or "") for case in cases}
+    require_unique_case_ids(cases)
+    evidence = {
+        (str(case.get("suite") or ""), case.get("id")): str(case.get("evidence_text") or "")
+        for case in cases
+    }
     chosen: list[dict[str, Any]] = []
     for row in atom_rows(cases, suites=set(EXPERIMENT_SUITES)):
         if row.get("expect") != "presented_iff_supported":
@@ -78,14 +98,15 @@ def select_candidates(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if cohort is None:
             continue
         gold = str(row["factuality"])
+        suite = _suite_of(cases, row["case_id"])
         chosen.append(
             {
-                "id": f"{row['case_id']}/{row['atom_id']}",
+                "id": f"{suite}/{row['case_id']}/{row['atom_id']}",
                 "case_id": row["case_id"],
                 "atom_id": row["atom_id"],
-                "suite": _suite_of(cases, row["case_id"]),
+                "suite": suite,
                 "claim_text": row["text"],
-                "evidence_text": evidence.get(row["case_id"], ""),
+                "evidence_text": evidence.get((suite, row["case_id"]), ""),
                 "gold": gold,
                 "gold_role": "supported" if gold == "SUPPORTED" else "negative_control",
                 "cohort": cohort,
@@ -302,16 +323,47 @@ def plan_experiment(cases: list[dict[str, Any]], *, model: str = "gpt-4.1-mini")
     }
 
 
-def run_authorized(rows: list[dict[str, Any]], *, model: str, api_key: str) -> list[dict[str, Any]]:
-    """Call OpenAI outside any database lock. The caller must already have authorized spend."""
+def _failed_prediction(row: dict[str, Any], reason: str, *, calls: int, elapsed: float = 0.0) -> dict[str, Any]:
+    return {
+        **row,
+        "model_label": "INSUFFICIENT_EVIDENCE",
+        "evidence_quote": "",
+        "reasoning": reason,
+        "latency_s": elapsed,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "llm_calls": calls,
+        "writes_memory": False,
+        "settled": True,
+    }
+
+
+def run_authorized(
+    rows: list[dict[str, Any]],
+    *,
+    model: str,
+    api_key: str,
+    resume: dict[str, dict[str, Any]] | None = None,
+    on_row: Any = None,
+) -> list[dict[str, Any]]:
+    """Call OpenAI outside any database lock. One failed claim abstains and the rest continue."""
     import time
 
     from harness.openai_shadow import OpenAIShadow, UrllibChatTransport
     from harness.shadow import ShadowRequest
 
+    saved = resume or {}
+    if not str(api_key or "").strip():
+        return [_failed_prediction(row, "missing_api_key", calls=0) for row in rows]
     classifier = OpenAIShadow(UrllibChatTransport(api_key), model, authorized=True)
     predictions: list[dict[str, Any]] = []
     for row in rows:
+        prior = saved.get(str(row.get("id")))
+        if prior is not None and prior.get("settled"):
+            predictions.append(prior)
+            if on_row is not None:
+                on_row(prior)
+            continue
         request = ShadowRequest(
             claim_text=str(row["claim_text"]),
             evidence_text=str(row["evidence_text"]),
@@ -321,11 +373,13 @@ def run_authorized(rows: list[dict[str, Any]], *, model: str, api_key: str) -> l
             stage=str(row.get("stage") or ""),
         )
         started = time.perf_counter()
-        classifier.classify(request)
-        elapsed = time.perf_counter() - started
-        parsed = classifier.records[-1]
-        predictions.append(
-            {
+        calls = 0
+        try:
+            calls = 1
+            classifier.classify(request)
+            elapsed = time.perf_counter() - started
+            parsed = classifier.records[-1]
+            result = {
                 **row,
                 "model_label": parsed["label"],
                 "evidence_quote": parsed["evidence_quote"],
@@ -333,10 +387,76 @@ def run_authorized(rows: list[dict[str, Any]], *, model: str, api_key: str) -> l
                 "latency_s": elapsed,
                 "prompt_tokens": parsed["prompt_tokens"],
                 "completion_tokens": parsed["completion_tokens"],
+                "llm_calls": calls,
                 "writes_memory": False,
+                "settled": True,
             }
-        )
+        except Exception as exc:
+            result = _failed_prediction(
+                row,
+                f"abstained: {exc.__class__.__name__}",
+                calls=calls,
+                elapsed=time.perf_counter() - started,
+            )
+        predictions.append(result)
+        if on_row is not None:
+            on_row(result)
     return predictions
+
+
+def refuse_same_output(source, output) -> None:
+    """Do not replace the experiment input with its own result file."""
+    from pathlib import Path
+
+    left = Path(source)
+    right = Path(output)
+    if left.resolve() == right.resolve():
+        raise SystemExit(f"refusing to overwrite input {left} with the experiment output")
+
+
+def write_json(path, payload: dict[str, Any]) -> None:
+    """Write a complete JSON file. A second run waits, and readers never see a partial file."""
+    import fcntl
+    import os
+    from pathlib import Path
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.with_name(target.name + ".lock")
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    text = json.dumps(payload, indent=2) + "\n"
+    with lock_path.open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            temporary.write_text(text, encoding="utf-8")
+            os.replace(temporary, target)
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if temporary.exists():
+                temporary.unlink()
+
+
+def settled_by_id(path) -> dict[str, dict[str, Any]]:
+    """Rows a previous run finished, keyed by id. Missing or unreadable files resume from scratch."""
+    from pathlib import Path
+
+    target = Path(path)
+    if not target.exists():
+        return {}
+    try:
+        document = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    found: dict[str, dict[str, Any]] = {}
+    for row in document.get("predictions") or []:
+        if isinstance(row, dict) and row.get("settled") and row.get("id") is not None:
+            found[str(row["id"])] = row
+    semantic = document.get("settled_semantic") or {}
+    if isinstance(semantic, dict):
+        for key, row in semantic.items():
+            if isinstance(row, dict) and row.get("settled"):
+                found[str(row.get("id") or key)] = row
+    return found
 
 
 def main() -> None:
@@ -357,6 +477,7 @@ def main() -> None:
         help="Authorize paid OpenAI calls. Without this flag the command only writes the plan.",
     )
     args = parser.parse_args()
+    refuse_same_output(args.from_results, args.output)
     document = json.loads(args.from_results.read_text())
     cases = document.get("cases") or []
     plan = plan_experiment(cases, model=args.model)
@@ -371,8 +492,7 @@ def main() -> None:
     )
     plan["git_revision"] = (revision.stdout or "").strip()
     if not args.i_accept_spend:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(plan, indent=2) + "\n")
+        write_json(args.output, plan)
         estimate = plan["estimate"]
         print(
             f"plan only: candidates={estimate['candidates']} "
@@ -382,9 +502,30 @@ def main() -> None:
         return
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
-        raise SystemExit("OPENAI_API_KEY is empty")
-    predictions = run_authorized(plan["candidates"], model=args.model, api_key=api_key)
-    plan["model_called"] = True
+        predictions = [_failed_prediction(row, "missing_api_key", calls=0) for row in plan["candidates"]]
+        plan["predictions"] = predictions
+        plan["model_called"] = False
+        plan["authorization"] = "missing_api_key"
+        write_json(args.output, plan)
+        print(f"abstained candidates={len(predictions)} reason=missing_api_key wrote {args.output}")
+        return
+
+    kept = settled_by_id(args.output)
+
+    def checkpoint(result: dict[str, Any]) -> None:
+        kept[str(result.get("id"))] = result
+        plan["partial"] = True
+        plan["predictions"] = list(kept.values())
+        write_json(args.output, plan)
+
+    predictions = run_authorized(
+        plan["candidates"],
+        model=args.model,
+        api_key=api_key,
+        resume=kept,
+        on_row=checkpoint,
+    )
+    plan["model_called"] = sum(int(row.get("llm_calls") or 0) for row in predictions) > 0
     plan["authorization"] = "i-accept-spend"
     plan["model"] = args.model
     plan["predictions"] = predictions
@@ -396,7 +537,8 @@ def main() -> None:
         "sum": sum(float(row.get("latency_s") or 0) for row in predictions),
         "n": len(predictions),
     }
-    args.output.write_text(json.dumps(plan, indent=2) + "\n")
+    plan.pop("partial", None)
+    write_json(args.output, plan)
     metrics = plan["model_metrics"]
     print(
         f"model={args.model} false_admission={metrics['false_claim_admission']['numerator']}/"

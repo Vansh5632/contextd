@@ -7,6 +7,7 @@ from harness.atomic import (
     decompose,
     gold_audit,
     polarity_conflict,
+    run_atomic_rows,
     verify_atoms,
 )
 
@@ -55,6 +56,35 @@ def test_supported_requires_every_atom() -> None:
     assert aggregate(["SUPPORTED", "CONTRADICTED"]) == "CONTRADICTED"
 
 
+def test_ascii_sentence_tails_are_separate_atoms() -> None:
+    assert decompose("quota_left increases by 1. The pool is exhausted") == [
+        "quota_left increases by 1",
+        "The pool is exhausted",
+    ]
+    assert decompose("quota_left increases by 1! The pool is exhausted") == [
+        "quota_left increases by 1",
+        "The pool is exhausted",
+    ]
+    assert decompose("quota_left increases by 1? The pool is exhausted") == [
+        "quota_left increases by 1",
+        "The pool is exhausted",
+    ]
+    assert decompose("quota_left increases by 1.5 before release_permit") == [
+        "quota_left increases by 1.5 before release_permit"
+    ]
+
+
+def test_a_leading_condition_is_its_own_atom() -> None:
+    assert decompose("If idle, counts connections") == ["If idle, counts connections", "If idle"]
+
+
+def test_unless_agrees_with_a_negated_focus() -> None:
+    evidence = "return len([item for item in connections if not item.idle])"
+    assert not polarity_conflict("unless idle", evidence)
+    assert polarity_conflict("if idle", evidence)
+    assert not polarity_conflict("if idle", "not counted\nitem.idle = true")
+
+
 def test_idle_polarity_disagrees_with_not_idle() -> None:
     evidence = "return len([item for item in connections if not item.idle])"
     assert polarity_conflict("if idle", evidence)
@@ -72,9 +102,23 @@ def test_one_supported_clause_cannot_carry_an_unsupported_tail() -> None:
     assert verdict["writes_memory"] is False
 
 
-def test_because_extracts_both_assertions() -> None:
+def test_because_keeps_the_causal_link_as_an_atom() -> None:
     atoms = decompose("release_permit failed because quota_left increased")
-    assert atoms == ["release_permit failed", "quota_left increased"]
+    assert atoms == [
+        "release_permit failed because quota_left increased",
+        "release_permit failed",
+        "quota_left increased",
+    ]
+    evidence = "release_permit()\nquota_left += 1\n"
+    verdict = verify_atoms(
+        [
+            {"text": atoms[0], "label": "INSUFFICIENT_EVIDENCE", "evidence_quote": ""},
+            {"text": atoms[1], "label": "SUPPORTED", "evidence_quote": "release_permit()"},
+            {"text": atoms[2], "label": "SUPPORTED", "evidence_quote": "quota_left += 1"},
+        ],
+        evidence,
+    )
+    assert verdict["label"] == "INSUFFICIENT_EVIDENCE"
 
 
 def test_before_stays_one_ordered_assertion() -> None:
@@ -138,6 +182,42 @@ def test_second_pass_cannot_force_support_without_a_quote() -> None:
     )
     assert cited[0]["label"] == "SUPPORTED"
     assert aggregate([item["label"] for item in cited]) == "SUPPORTED"
+
+
+def test_a_failed_call_abstains_and_a_retry_does_not_pay_again() -> None:
+    rows = [
+        {"id": "a", "case_id": "a", "claim_text": "quota_left increases", "evidence_text": "quota_left += 1", "gold": "SUPPORTED"},
+        {"id": "b", "case_id": "b", "claim_text": "quota_left increases", "evidence_text": "quota_left += 1", "gold": "SUPPORTED"},
+    ]
+
+    class Down:
+        def complete(self, payload: dict) -> dict:
+            del payload
+            raise TimeoutError("down")
+
+    failed = run_atomic_rows(rows, model="gpt-4.1-mini", api_key="test", transport=Down())
+    assert [row["model_label"] for row in failed] == ["INSUFFICIENT_EVIDENCE", "INSUFFICIENT_EVIDENCE"]
+    assert all(row["settled"] and row["writes_memory"] is False for row in failed)
+    missing = run_atomic_rows(rows[:1], model="gpt-4.1-mini", api_key="")
+    assert missing[0]["llm_calls"] == 0
+
+    calls = {"n": 0}
+
+    class Once:
+        def complete(self, payload: dict) -> dict:
+            del payload
+            calls["n"] += 1
+            return {"choices": [{"message": {"content": "{\"atoms\": []}"}}], "usage": {"prompt_tokens": 2, "completion_tokens": 1}}
+
+    again = run_atomic_rows(
+        rows,
+        model="gpt-4.1-mini",
+        api_key="test",
+        transport=Once(),
+        resume={str(row["id"]): row for row in failed},
+    )
+    assert calls["n"] == 0
+    assert [row["id"] for row in again] == ["a", "b"]
 
 
 def test_gold_audit_keeps_d03_and_d14() -> None:

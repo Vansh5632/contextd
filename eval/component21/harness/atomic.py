@@ -11,8 +11,8 @@ import json
 import re
 from typing import Any
 
-_BOUNDARY = re.compile(r"[。！？；;]+|(?<![A-Za-z0-9])\.(?=\s|$)")
-_CONDITIONAL = re.compile(r"\s+(only when|unless|if)\s+", re.IGNORECASE)
+_BOUNDARY = re.compile(r"[。！？；;]+|(?<=[A-Za-z0-9])[.!?](?=\s|$)")
+_CONDITIONAL = re.compile(r"(?:^|\s+)(only when|unless|if)\s+", re.IGNORECASE)
 _BECAUSE = re.compile(r"\s+because\s+", re.IGNORECASE)
 _FOCUS = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -78,19 +78,15 @@ def aggregate(labels: list[str]) -> str:
 def polarity_conflict(atom: str, evidence: str) -> bool:
     """True when a condition atom's negation disagrees with the evidence.
 
-    ``if idle`` conflicts with ``if not item.idle``. ``if not idle`` does not.
+    ``if idle`` conflicts with ``if not item.idle``. ``unless idle`` does not:
+    ``unless`` already means the negated condition. Only a ``not`` that
+    modifies the focus word counts.
     """
     parsed = _condition(atom)
     if parsed is None:
         return False
     negated, focus = parsed
-    evidence_lower = evidence.lower()
-    for match in re.finditer(re.escape(focus), evidence_lower):
-        window = evidence_lower[max(0, match.start() - 24) : match.start()]
-        evidence_negated = re.search(r"\bnot\b", window) is not None
-        if evidence_negated != negated:
-            return True
-    return False
+    return _focus_negated(evidence, focus) != negated
 
 
 def verify_atoms(atoms: list[dict[str, Any]], evidence: str) -> dict[str, Any]:
@@ -360,13 +356,25 @@ def _boundaries(text: str) -> list[str]:
 
 def _because(clause: str) -> list[str]:
     parts = [part.strip() for part in _BECAUSE.split(clause) if part.strip()]
-    return parts or [clause]
+    if len(parts) <= 1:
+        return [clause]
+    # The causal sentence is its own atom. True clauses do not prove the link.
+    return [clause.strip(), *parts]
 
 
 def _conditional(clause: str) -> list[str]:
     match = _CONDITIONAL.search(clause)
     if match is None:
         return [clause]
+    prefix = clause[: match.start()].strip()
+    if not prefix:
+        body = clause[match.end() :].strip()
+        condition_body = body.split(",", 1)[0].strip()
+        condition = f"{match.group(1)} {condition_body}".strip()
+        pieces = [clause.strip()]
+        if condition and condition.lower() != clause.strip().lower():
+            pieces.append(condition)
+        return pieces
     tail = clause[match.start() :].strip()
     # Keep the full clause. The condition is an extra atom that must also pass,
     # so one true clause cannot carry a reversed or unsupported condition.
@@ -377,8 +385,11 @@ def _condition(atom: str) -> tuple[bool, str] | None:
     match = re.match(r"(?i)(if|only when|unless)\s+(.*)$", atom.strip())
     if match is None:
         return None
+    marker = match.group(1).lower()
     body = match.group(2).strip()
-    negated = re.match(r"(?i)not\b", body) is not None
+    body_negated = re.match(r"(?i)not\b", body) is not None
+    # ``unless P`` is the negated condition. ``unless not P`` is not.
+    negated = (marker == "unless") != body_negated
     focus_body = re.sub(r"(?i)^not\s+", "", body).strip()
     words = _FOCUS.findall(focus_body)
     if not words:
@@ -386,30 +397,88 @@ def _condition(atom: str) -> tuple[bool, str] | None:
     return negated, words[-1].lower()
 
 
+def _focus_negated(evidence: str, focus: str) -> bool:
+    """True when ``not`` applies to this focus, as in ``not idle`` or ``not item.idle``."""
+    pattern = re.compile(rf"(?i)\bnot\s+(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?{re.escape(focus)}\b")
+    return pattern.search(evidence) is not None
+
+
 def label_statement(model_atoms: list[dict[str, Any]], evidence: str, expected: list[str]) -> dict[str, Any]:
     """Align the model's atom labels, then aggregate in code."""
     return verify_atoms(align_model_atoms(expected, model_atoms), evidence)
 
 
-def run_atomic_rows(rows: list[dict[str, Any]], *, model: str, api_key: str) -> list[dict[str, Any]]:
-    """One pass. The transport is created here and never receives a database."""
+def _abstained(row: dict[str, Any], reason: str, *, calls: int, elapsed: float = 0.0) -> dict[str, Any]:
+    return {
+        **row,
+        "model_label": "INSUFFICIENT_EVIDENCE",
+        "evidence_quote": "",
+        "atoms": [],
+        "atom_count": 0,
+        "decomposed": decompose(str(row.get("claim_text") or "")),
+        "rechecked": 0,
+        "reasoning": reason,
+        "latency_s": elapsed,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "llm_calls": calls,
+        "writes_memory": False,
+        "settled": True,
+    }
+
+
+def run_atomic_rows(
+    rows: list[dict[str, Any]],
+    *,
+    model: str,
+    api_key: str,
+    transport: Any = None,
+    resume: dict[str, dict[str, Any]] | None = None,
+    on_row: Any = None,
+) -> list[dict[str, Any]]:
+    """One pass. A failed call abstains that claim and the batch continues.
+
+    ``resume`` skips row ids that a previous run already settled, so a retry
+    does not pay for them again. The transport never receives a database.
+    """
     import time
 
     from harness.openai_shadow import UrllibChatTransport
-    from harness.shadow_experiment import SpendNotAuthorized
 
-    if not api_key:
-        raise SpendNotAuthorized("refusing OpenAI call; pass --i-accept-spend to authorize")
-    transport = UrllibChatTransport(api_key)
+    saved = resume or {}
+    if transport is None:
+        if not str(api_key or "").strip():
+            return [_abstained(row, "missing_api_key", calls=0) for row in rows]
+        transport = UrllibChatTransport(api_key)
     labeled = []
     for row in rows:
+        prior = saved.get(str(row.get("id")))
+        if prior is not None and prior.get("settled"):
+            labeled.append(prior)
+            if on_row is not None:
+                on_row(prior)
+            continue
         claim = str(row["claim_text"])
         evidence = str(row.get("evidence_text") or "")
         atoms = decompose(claim)
         print(f"  {row.get('case_id')} atoms={len(atoms)}", flush=True)
-        payload = build_atomic_payload(model, claim, evidence, atoms)
+        calls = 0
         started = time.perf_counter()
-        parsed = parse_atomic_output(transport.complete(payload))
+        try:
+            payload = build_atomic_payload(model, claim, evidence, atoms)
+            calls += 1
+            parsed = parse_atomic_output(transport.complete(payload))
+        except Exception as exc:
+            result = _abstained(
+                row,
+                f"abstained: {exc.__class__.__name__}",
+                calls=calls,
+                elapsed=time.perf_counter() - started,
+            )
+            labeled.append(result)
+            if on_row is not None:
+                on_row(result)
+            continue
         elapsed = time.perf_counter() - started
         prompt_tokens = parsed["prompt_tokens"]
         completion_tokens = parsed["completion_tokens"]
@@ -421,6 +490,7 @@ def run_atomic_rows(rows: list[dict[str, Any]], *, model: str, api_key: str) -> 
             recheck = build_reverify_payload(model, str(atom.get("text") or ""), evidence)
             started_recheck = time.perf_counter()
             try:
+                calls += 1
                 body = transport.complete(recheck)
                 message = body["choices"][0]["message"]
                 data = json.loads(message.get("content") or "{}")
@@ -437,24 +507,25 @@ def run_atomic_rows(rows: list[dict[str, Any]], *, model: str, api_key: str) -> 
             elapsed += time.perf_counter() - started_recheck
         revised = apply_second_pass(verdict["atoms"], second, evidence)
         sentence = aggregate([str(item["label"]) for item in revised])
-        labeled.append(
-            {
-                **row,
-                "model_label": sentence,
-                "evidence_quote": _sentence_quote(sentence, revised, evidence),
-                "atoms": revised,
-                "atom_count": len(atoms),
-                "decomposed": atoms,
-                "rechecked": len(pending),
-                "reasoning": " | ".join(
-                    f"{item['text']}: {item['label']}" for item in revised
-                ),
-                "latency_s": elapsed,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "writes_memory": False,
-            }
-        )
+        result = {
+            **row,
+            "model_label": sentence,
+            "evidence_quote": _sentence_quote(sentence, revised, evidence),
+            "atoms": revised,
+            "atom_count": len(atoms),
+            "decomposed": atoms,
+            "rechecked": len(pending),
+            "reasoning": " | ".join(f"{item['text']}: {item['label']}" for item in revised),
+            "latency_s": elapsed,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "llm_calls": calls,
+            "writes_memory": False,
+            "settled": True,
+        }
+        labeled.append(result)
+        if on_row is not None:
+            on_row(result)
     return labeled
 
 
@@ -474,12 +545,13 @@ def _sentence_quote(sentence: str, atoms: list[dict[str, Any]], evidence: str) -
 
 
 def _load_rows(path: str) -> list[dict[str, Any]]:
+    from harness.shadow_experiment import EXPERIMENT_SUITES
+
     document = json.loads(open(path, encoding="utf-8").read())
     rows = document.get("predictions") or document.get("candidates") or []
     kept = []
     for row in rows:
-        suite = row.get("suite")
-        if suite in {"heldout", "continuation"}:
+        if row.get("suite") not in EXPERIMENT_SUITES:
             continue
         if row.get("claim_text") and row.get("gold"):
             kept.append(row)
@@ -524,7 +596,10 @@ def main() -> None:
     parser.add_argument("--model", default="gpt-4.1-mini")
     parser.add_argument("--repeat", type=int, default=2)
     parser.add_argument("--i-accept-spend", action="store_true")
+    from harness.shadow_experiment import refuse_same_output, settled_by_id, write_json
+
     args = parser.parse_args()
+    refuse_same_output(args.from_experiment, args.output)
     rows = _load_rows(str(args.from_experiment))
     plan = {
         "experiment": "atomic-3",
@@ -540,26 +615,50 @@ def main() -> None:
         ],
     }
     if not args.i_accept_spend:
-        args.output.write_text(json.dumps(plan, indent=2) + "\n")
+        write_json(args.output, plan)
         print(f"plan only: claims={len(rows)} authorization=spend_not_authorized")
         return
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
-        raise SystemExit("OPENAI_API_KEY is empty")
+        plan["predictions"] = [_abstained(row, "missing_api_key", calls=0) for row in rows]
+        plan["model_called"] = False
+        plan["authorization"] = "missing_api_key"
+        write_json(args.output, plan)
+        print(f"abstained claims={len(rows)} reason=missing_api_key wrote {args.output}")
+        return
     from harness.shadow_experiment import estimate_cost, score_predictions
 
+    resume = settled_by_id(args.output)
     passes = []
+    kept = dict(resume)
+
+    def checkpoint(result: dict[str, Any]) -> None:
+        kept[str(result.get("id"))] = result
+        plan["partial"] = True
+        plan["predictions"] = list(kept.values())
+        write_json(args.output, plan)
+
     for index in range(max(1, args.repeat)):
         print(f"pass {index + 1}/{args.repeat}", flush=True)
-        passes.append(run_atomic_rows(rows, model=args.model, api_key=api_key))
+        passes.append(
+            run_atomic_rows(
+                rows,
+                model=args.model,
+                api_key=api_key,
+                resume=resume if index == 0 else None,
+                on_row=checkpoint if index == 0 else None,
+            )
+        )
+        plan["predictions"] = passes[-1]
     primary = passes[0]
-    tokens_in = sum(int(row["prompt_tokens"]) for run in passes for row in run)
-    tokens_out = sum(int(row["completion_tokens"]) for run in passes for row in run)
-    latency = [float(row["latency_s"]) for run in passes for row in run]
+    tokens_in = sum(int(row.get("prompt_tokens") or 0) for run in passes for row in run)
+    tokens_out = sum(int(row.get("completion_tokens") or 0) for run in passes for row in run)
+    calls = sum(int(row.get("llm_calls") or 0) for run in passes for row in run)
+    latency = [float(row.get("latency_s") or 0) for run in passes for row in run]
     split = sum(1 for row in primary if row["atom_count"] > 1)
     plan.update(
         {
-            "model_called": True,
+            "model_called": calls > 0,
             "authorization": "i-accept-spend",
             "model": args.model,
             "metrics": score_predictions(primary),
@@ -571,15 +670,20 @@ def main() -> None:
                 "atoms": sum(row["atom_count"] for row in primary),
             },
             "usage": estimate_cost(tokens_in, tokens_out, args.model),
-            "latency_s": {"sum": sum(latency), "n": len(latency), "mean": sum(latency) / len(latency)},
+            "llm_calls": calls,
+            "latency_s": {
+                "sum": sum(latency),
+                "n": len(latency),
+                "mean": 0 if not latency else sum(latency) / len(latency),
+            },
             "predictions": primary,
             "repeat_labels": [
                 [{"id": row.get("id"), "model_label": row["model_label"]} for row in run] for run in passes
             ],
         }
     )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(plan, indent=2) + "\n")
+    plan.pop("partial", None)
+    write_json(args.output, plan)
     metrics = plan["metrics"]
     print(
         f"false_admission={metrics['false_claim_admission']['numerator']}/{metrics['false_claim_admission']['denominator']} "

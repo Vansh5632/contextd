@@ -12,8 +12,10 @@ from harness.shadow_experiment import (
     build_request_payload,
     estimate_cost,
     plan_experiment,
+    refuse_same_output,
     score_predictions,
     select_candidates,
+    write_json,
 )
 from harness.openai_shadow import OpenAIShadow
 
@@ -156,7 +158,29 @@ def test_plan_estimates_cost_and_records_no_model_call() -> None:
     assert plan["writes_memory"] is False
     assert plan["heldout_excluded"] is True
     assert plan["estimate"]["candidates"] == len(select_candidates(_population()))
-    assert plan["estimate"]["usd"] > 0
-    assert estimate_cost(1000, 100, "gpt-4.1-mini")["usd"] > 0
+    assert plan["estimate"]["usd"] == estimate_cost(
+        plan["estimate"]["prompt_tokens"],
+        plan["estimate"]["completion_tokens"],
+        "gpt-4.1-mini",
+    )["usd"]
+    assert estimate_cost(1000, 100, "gpt-4.1-mini")["usd"] == (1000 * 0.40 + 100 * 1.60) / 1_000_000
     checker = plan["checker"]
     assert checker["false_claim_admission"]["denominator"] > 0
+
+
+def test_a_repeated_case_id_is_refused() -> None:
+    cases = _population()
+    cases.append({**cases[0], "suite": "heldout"})
+    with pytest.raises(ValueError, match="shared"):
+        select_candidates(cases)
+
+
+def test_output_cannot_replace_the_input_and_missing_parents_are_created(tmp_path) -> None:
+    source = tmp_path / "in.json"
+    source.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        refuse_same_output(source, source)
+    target = tmp_path / "nested" / "plan.json"
+    write_json(target, {"model_called": False})
+    assert json.loads(target.read_text(encoding="utf-8"))["model_called"] is False
+    assert not list(target.parent.glob(".plan.json.*.tmp"))
