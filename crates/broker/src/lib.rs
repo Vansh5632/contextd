@@ -11,6 +11,7 @@ pub mod relevance;
 pub mod search;
 pub mod shadow;
 pub mod snapshot;
+pub mod verify;
 
 /// Embed a query string, or return `None` for any reason at all.
 ///

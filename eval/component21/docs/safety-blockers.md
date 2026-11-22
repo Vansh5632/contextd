@@ -1,6 +1,6 @@
 # Production safety blockers
 
-Three daemon bugs blocked any later use of the shadow verifier. The verifier is still not on the admission path. These fixes are only about not crashing, not treating a cut-off listing as proof, and not storing an evidence-free agent sentence as an established reality.
+Three daemon bugs blocked any later use of the shadow verifier. These fixes are only about not crashing, not treating a cut-off listing as proof, and not storing an evidence-free agent sentence as an established reality. The hybrid verifier now sits on the admission path; see `hybrid-integration.md`.
 
 ## What changed
 

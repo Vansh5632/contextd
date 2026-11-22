@@ -57,6 +57,22 @@ def harness_error_judgment(atom: dict[str, Any], exc: Exception) -> dict[str, An
     }
 
 
+def _verification_totals(steps: list[dict[str, Any]]) -> dict[str, int]:
+    """Sum model usage reported by handoff. Scoring does not read this."""
+    totals = {
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "latency_ms": 0,
+    }
+    for step in steps:
+        totals["calls"] += int(step.get("verification_calls") or 0)
+        totals["prompt_tokens"] += int(step.get("prompt_tokens") or 0)
+        totals["completion_tokens"] += int(step.get("completion_tokens") or 0)
+        totals["latency_ms"] += int(step.get("verification_latency_ms") or 0)
+    return totals
+
+
 def _session(case: dict[str, Any], step: dict[str, Any]) -> str:
     if "session" in step:
         return str(step["session"])
@@ -131,7 +147,10 @@ def _apply_step(
         if step.get("kind") == "tool" and event_id:
             state.setdefault("evidence_by_event", {})[str(event_id)] = str(step.get("output") or "")
     elif action in {"handoff", "now"}:
-        outcome = daemon.ask({"query": action})
+        # Verification calls the model before the writer lock. One claim can
+        # take the model timeout plus a recheck, so the socket wait is longer
+        # than a local handoff.
+        outcome = daemon.ask({"query": action}, timeout=120)
         record["query"] = action
         record["error"] = outcome["error"]
         record["transport_error"] = outcome.get("transport_error")
@@ -142,6 +161,10 @@ def _apply_step(
             record["skipped"] = response.get("skipped") or []
             record["rejected"] = response.get("rejected") or []
             record["diagnostics"] = response.get("diagnostics") or []
+            record["verification_calls"] = int(response.get("verification_calls") or 0)
+            record["prompt_tokens"] = int(response.get("prompt_tokens") or 0)
+            record["completion_tokens"] = int(response.get("completion_tokens") or 0)
+            record["verification_latency_ms"] = int(response.get("verification_latency_ms") or 0)
             state.setdefault("diagnostics", []).extend(record["diagnostics"])
         if action == "now" and outcome["error"] is None:
             record["claim_texts"] = [item["text"] for item in rendered_claims(response)]
@@ -477,4 +500,5 @@ def execute_case(case: dict[str, Any], binary: Any) -> dict[str, Any]:
         "store_summary": store_summary,
         "verifier_diagnostics": list(state.get("diagnostics") or []),
         "evidence_by_event": dict(state.get("evidence_by_event") or {}),
+        "verification": _verification_totals(steps),
     }

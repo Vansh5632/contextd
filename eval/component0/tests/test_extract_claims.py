@@ -289,7 +289,18 @@ def test_rust_extractor_matches_python_on_the_episode(tmp_path: Path) -> None:
         for item in report["accepted"]
         if item["kind"] != "retract"
     }
-    assert rust == python
+    # The daemon no longer promotes a paraphrase the model has not supported.
+    # The Python extractor still records that older lexical admission.
+    held_for_verification = {
+        (
+            "reality",
+            "The create-new-connection branch only counts connections that are not idle",
+            "inferred",
+        )
+    }
+    assert held_for_verification <= python
+    assert held_for_verification.isdisjoint(rust)
+    assert rust == python - held_for_verification
     assert report["snapshot"]["focal_task"]["id"] == "t_a58f76e3ca4078e8a849ed9682f450cc"
 
 
