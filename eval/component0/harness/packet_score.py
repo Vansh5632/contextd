@@ -244,7 +244,10 @@ def classify_unit(unit: str, atoms: AtomSet) -> UnitMatch:
     matched = [a for a in atoms.atoms if a.matches(unit)]
     stale = any(a.role == "stale" for a in matched)
     marked = bool(atoms.superseded.search(unit))
-    stale_as_current = stale and not marked
+    # A hypothesis is not an established reality. The stale sentence can stay
+    # in the log without being presented as a current fact.
+    held_back = unit.startswith("[unknown]")
+    stale_as_current = stale and not marked and not held_back
     stale_marked = stale and marked
     # A stale claim explicitly marked superseded is load-bearing: it stops the takeover
     # agent from reviving it, so it counts as relevant for precision.
