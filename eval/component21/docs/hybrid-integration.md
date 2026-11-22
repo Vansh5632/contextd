@@ -79,6 +79,7 @@ Shadow experiment 5 is a different measurement (a label beside the old admission
 - The handoff client waits for the model. The writer lock does not. Each socket query runs on its own task, so another query is not stuck behind that lock. This run did not add a separate concurrent-load benchmark.
 - `f15` and `f17` can still show an insufficient claim as current. The verifier does not repair supersession or replay order.
 - A restated claim after a retract can still be skipped as a duplicate (`f16`).
+- The episode checker counts a stale sentence as current only when it is presented as a reality. A hypothesis of that sentence stays in the log.
 - Vacuous case status hides a supported prefix when the same note also has an unsupported tail. Read the atoms.
 - h05 was not admitted. The sealed label is insufficient. The run was not used to change the prompt or the router.
 - Every later handoff classifies semantic spans again. Restart replay does not. An admitted reality is already in the log, so the second handoff does not need the original verdict.
