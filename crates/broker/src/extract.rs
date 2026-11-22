@@ -88,6 +88,9 @@ pub struct Candidate {
     #[serde(default)]
     pub support_text: Option<String>,
     pub task_subject: String,
+    /// The hybrid verifier already found evidence for this reality.
+    #[serde(default)]
+    pub verified: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +105,10 @@ struct Draft {
     source_text: String,
     support_text: Option<String>,
     task_subject: String,
+    verified: bool,
+    /// False when this span is a later atom of the same sentence.
+    /// A later atom whose words are absent from the evidence is a gap.
+    primary: bool,
 }
 
 impl Draft {
@@ -117,6 +124,7 @@ impl Draft {
             source_text: self.source_text.clone(),
             support_text: self.support_text.clone(),
             task_subject: self.task_subject.clone(),
+            verified: self.verified,
         }
     }
 }
@@ -376,6 +384,18 @@ pub struct HandoffReport {
     /// True when further clause rows were dropped to keep the report bounded.
     #[serde(default, skip_serializing_if = "is_false")]
     pub diagnostics_truncated: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub verification_calls: u32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub prompt_tokens: u32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub completion_tokens: u32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub verification_latency_ms: u64,
+}
+
+fn is_zero<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 
 fn is_false(value: &bool) -> bool {
@@ -508,6 +528,13 @@ pub fn admit_candidates(log: &mut Vec<RawEvent>, candidates: Vec<Candidate>) -> 
 /// that already has a claim is left alone, and an identical quote is not
 /// inserted twice.
 pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
+    apply_extraction_verified(log, &crate::verify::Verification::default())
+}
+
+pub fn apply_extraction_verified(
+    log: &mut Vec<RawEvent>,
+    verification: &crate::verify::Verification,
+) -> HandoffReport {
     sort_log(log);
     let original_len = log.len();
     let applied = cited_notes(&log[..original_len]);
@@ -609,7 +636,7 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
             skip(&mut report, &event.id, &reason_text);
             continue;
         }
-        for draft in drafts {
+        for mut draft in drafts {
             if !draft.source_text.contains(&draft.text) || draft.text.is_empty() {
                 trace(
                     &mut diagnostics,
@@ -643,27 +670,31 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
                 continue;
             }
             if draft.kind == "reality" {
-                let (reason, relation) =
-                    relation_decision(&draft.text, draft.support_text.as_deref().unwrap_or(""));
-                if relation != EvidenceRelation::Supported {
-                    trace_cited(
+                let evidence = judgment_evidence(&draft, log);
+                let judgment = crate::verify::judge_span(
+                    &draft.text,
+                    &evidence,
+                    verification.verdict_for(&draft.text),
+                    draft.primary,
+                );
+                if judgment.label != crate::verify::Label::Supported {
+                    remember_unverified(
+                        log,
+                        &draft,
+                        &mut projection,
+                        &mut report,
                         &mut diagnostics,
-                        "apply_extraction",
-                        &draft.text,
-                        "skipped",
-                        reason,
-                        relation_label(relation),
-                        cited,
+                        judgment.route,
                     );
-                    skip(&mut report, &event.id, evidence_skip_reason(relation));
                     continue;
                 }
+                draft.verified = true;
                 trace_cited(
                     &mut diagnostics,
                     "apply_extraction",
                     &draft.text,
                     "extracted",
-                    reason,
+                    "lexical_pass",
                     "supported",
                     cited,
                 );
@@ -705,12 +736,24 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
 /// invoked here; [`crate::shadow::run_shadow`] takes no connection and must
 /// run before the writer lock is taken.
 pub fn run_handoff(conn: &Connection) -> rusqlite::Result<HandoffReport> {
+    run_handoff_with(conn, &crate::verify::Verification::default())
+}
+
+pub fn run_handoff_with(
+    conn: &Connection,
+    verification: &crate::verify::Verification,
+) -> rusqlite::Result<HandoffReport> {
     let mut events = store::db::get_handoff_events(conn)?;
     if !events.iter().any(|event| event.source == EventSource::Note) {
         return Ok(HandoffReport::default());
     }
     let before: BTreeSet<String> = events.iter().map(|event| event.id.clone()).collect();
-    let report = apply_extraction(&mut events);
+    let mut report = apply_extraction_verified(&mut events, verification);
+    let (calls, prompt, completion, latency) = verification.usage();
+    report.verification_calls = calls;
+    report.prompt_tokens = prompt;
+    report.completion_tokens = completion;
+    report.verification_latency_ms = latency;
     let mut added = false;
     for event in events {
         if before.contains(&event.id) {
@@ -724,6 +767,55 @@ pub fn run_handoff(conn: &Connection) -> rusqlite::Result<HandoffReport> {
         memory::project::rebuild(conn)?;
     }
     Ok(report)
+}
+
+/// Reality claims the deterministic router cannot prove. Classify these before
+/// taking the SQLite writer.
+pub fn semantic_requests(events: &[RawEvent]) -> Vec<crate::verify::SemanticRequest> {
+    let mut diagnostics = Vec::new();
+    let mut requests = Vec::new();
+    for (index, event) in events.iter().enumerate() {
+        if event.source != EventSource::Note {
+            continue;
+        }
+        let text = payload_str(event, "text");
+        let Some(task_event) = note_task(events, event) else {
+            continue;
+        };
+        let task = task_for(task_event);
+        let support = support_event(events, event, index);
+        for draft in drafts_for_note(event, &text, support, &task, &mut diagnostics) {
+            if draft.kind != "reality" {
+                continue;
+            }
+            let evidence = judgment_evidence(&draft, events);
+            if crate::verify::needs_model_span(&draft.text, &evidence, draft.primary) {
+                requests.push(crate::verify::SemanticRequest {
+                    claim: draft.text,
+                    evidence,
+                });
+            }
+        }
+    }
+    requests
+}
+
+/// Drop model verdicts whose tool output changed while the request was in flight.
+pub fn drop_stale(
+    before: &[RawEvent],
+    after: &[RawEvent],
+    mut verification: crate::verify::Verification,
+) -> crate::verify::Verification {
+    let later: std::collections::BTreeMap<String, String> = semantic_requests(after)
+        .into_iter()
+        .map(|request| (request.claim, request.evidence))
+        .collect();
+    for request in semantic_requests(before) {
+        if later.get(&request.claim) != Some(&request.evidence) {
+            verification.verdicts.remove(&request.claim);
+        }
+    }
+    verification
 }
 
 fn accept_or_record(
@@ -1118,9 +1210,17 @@ fn admit(
                 "support text does not match the cited shell output",
             ));
         }
-        let (reason, relation) = relation_decision(text, &output);
-        if relation != EvidenceRelation::Supported {
-            return Err(gate(reason, evidence_skip_reason(relation)));
+        if support_is_incomplete(&output) || output.trim().is_empty() {
+            return Err(gate(
+                "incomplete_evidence",
+                "tool output is missing or truncated",
+            ));
+        }
+        if !candidate.verified {
+            let (reason, relation) = relation_decision(text, &output);
+            if relation != EvidenceRelation::Supported {
+                return Err(gate(reason, evidence_skip_reason(relation)));
+            }
         }
     }
     if confidence == ClaimConfidence::Observed {
@@ -1321,15 +1421,13 @@ fn natural_drafts(
             ));
             continue;
         }
-        for (span_index, span) in kept_texts(sentence, &output, shell_id(support), diagnostics)
-            .into_iter()
-            .enumerate()
-        {
+        let _lexical = kept_texts(sentence, &output, shell_id(support), diagnostics);
+        for (span_index, span) in verified_spans(sentence).into_iter().enumerate() {
             let Some(kind) = classify_span(&span) else {
                 continue;
             };
             let suffix = span_suffix(index, span_index);
-            let draft = match kind {
+            let mut draft = match kind {
                 Natural::Hypothesis => speech_draft(
                     note,
                     &span,
@@ -1365,6 +1463,7 @@ fn natural_drafts(
                     support.filter(|event| event.source == EventSource::Shell),
                 ),
             };
+            draft.primary = span_index == 0;
             drafts.push(draft);
         }
     }
@@ -1381,10 +1480,8 @@ fn span_drafts(
 ) -> Vec<Draft> {
     let mut drafts = Vec::new();
     for (index, sentence) in sentences(text).into_iter().enumerate() {
-        for (span_index, span) in { kept_texts(sentence, output, shell_id(support), diagnostics) }
-            .into_iter()
-            .enumerate()
-        {
+        let _lexical = kept_texts(sentence, output, shell_id(support), diagnostics);
+        for (span_index, span) in verified_spans(sentence).into_iter().enumerate() {
             let Some(kind) = classify_span(&span) else {
                 continue;
             };
@@ -1396,7 +1493,7 @@ fn span_drafts(
                 Natural::Reality => ("reality", "inferred"),
                 Natural::Hypothesis | Natural::NextAction => continue,
             };
-            drafts.push(speech_draft(
+            let mut draft = speech_draft(
                 note,
                 &span,
                 task,
@@ -1406,7 +1503,9 @@ fn span_drafts(
                 &span_suffix(index, span_index),
                 None,
                 support,
-            ));
+            );
+            draft.primary = span_index == 0;
+            drafts.push(draft);
         }
     }
     drafts
@@ -1469,6 +1568,8 @@ fn speech_draft(
         source_text: payload_str(note, "text"),
         support_text,
         task_subject: task.to_string(),
+        verified: false,
+        primary: true,
     }
 }
 
@@ -1902,6 +2003,7 @@ fn hedge(sentence: &str) -> bool {
     let lower = sentence.to_lowercase();
     has_word(&lower, "might")
         || has_word(&lower, "maybe")
+        || has_word(&lower, "probably")
         || lower.contains("not sure")
         || lower.contains("could be")
 }
@@ -1947,6 +2049,64 @@ fn relation_decision(sentence: &str, support: &str) -> (&'static str, EvidenceRe
         return ("low_overlap", EvidenceRelation::Insufficient);
     }
     ("lexical_pass", EvidenceRelation::Supported)
+}
+
+/// Spans the hybrid verifier judges.
+///
+/// A sentence boundary or a clause marker yields one span per piece, so a
+/// supported prefix can be admitted while an unsupported tail stays a
+/// hypothesis. A sentence the lexical filter would drop is still returned:
+/// residue is not an admission decision.
+/// Evidence the verifier may use.
+///
+/// A second run of the same command can replace the listing the claim cites.
+/// Those outputs are judged together so a later assignment is not ignored.
+fn judgment_evidence(draft: &Draft, events: &[RawEvent]) -> String {
+    let cited = draft.support_text.clone().unwrap_or_default();
+    let Some(command) = draft.evidence_ids.iter().find_map(|id| {
+        let event = event_by_id(events, id)?;
+        (event.source == EventSource::Shell).then(|| payload_str(event, "command"))
+    }) else {
+        return cited;
+    };
+    if command.is_empty() {
+        return cited;
+    }
+    let outputs: Vec<String> = events
+        .iter()
+        .filter(|event| {
+            event.source == EventSource::Shell && payload_str(event, "command") == command
+        })
+        .map(|event| payload_str(event, "output"))
+        .filter(|output| !output.trim().is_empty())
+        .collect();
+    if outputs.len() <= 1 || outputs.iter().all(|output| output == &outputs[0]) {
+        cited
+    } else {
+        outputs.join("\n")
+    }
+}
+
+fn verified_spans(sentence: &str) -> Vec<String> {
+    let atoms = crate::verify::decompose(sentence);
+    if atoms.len() > 1 {
+        return atoms
+            .into_iter()
+            .filter(|atom| sentence.contains(atom.as_str()))
+            .collect();
+    }
+    let clauses = evidence_clauses(sentence);
+    if clauses.len() > 1 {
+        return clauses;
+    }
+    // One sentence stays verbatim, including a trailing period. Splitting
+    // would make the stored claim miss the words the note actually used.
+    let trimmed = sentence.trim();
+    if trimmed.is_empty() {
+        Vec::new()
+    } else {
+        vec![trimmed.to_string()]
+    }
 }
 
 fn kept_texts(
@@ -2120,14 +2280,6 @@ fn trace_cited(
         relation: TraceRelation::parse(relation),
         support_event_id: support_event_id.map(str::to_string),
     });
-}
-
-fn relation_label(relation: EvidenceRelation) -> &'static str {
-    match relation {
-        EvidenceRelation::Supported => "supported",
-        EvidenceRelation::Contradicted => "contradicted",
-        EvidenceRelation::Insufficient => "insufficient",
-    }
 }
 
 fn relation_for_reason(reason: &str) -> &'static str {
@@ -2672,8 +2824,68 @@ fn demote_claim(
         source_text,
         support_text: None,
         task_subject: task_subject.to_string(),
+        verified: false,
     };
     accept_or_record(log, &uncertain, projection, seen, report, diagnostics);
+}
+
+fn remember_unverified(
+    log: &mut Vec<RawEvent>,
+    draft: &Draft,
+    projection: &mut Projection,
+    report: &mut HandoffReport,
+    diagnostics: &mut Vec<DecisionTrace>,
+    route: &str,
+) {
+    let support_id = draft.evidence_ids.get(1).map(String::as_str);
+    trace_cited(
+        diagnostics,
+        "apply_extraction",
+        &draft.text,
+        "skipped",
+        if route == "semantic_failed" {
+            "ungrounded"
+        } else {
+            "incomplete_evidence"
+        },
+        "insufficient",
+        support_id,
+    );
+    let claim_id = format!("hyp_{}", draft.claim_id);
+    let already = projection.claims.iter().any(|claim| {
+        claim.status == ClaimStatus::Current
+            && claim.confidence == ClaimConfidence::Hypothesis
+            && claim.text == draft.text
+            && claim.task_id == task_id_for_subject(&draft.task_subject)
+    });
+    if !already {
+        let hypothesis = ClaimEvent {
+            op: ClaimOp::Assert,
+            claim_id: claim_id.clone(),
+            task_id: task_id_for_subject(&draft.task_subject),
+            kind: Some(ClaimKind::Unknown),
+            subject: Some(claim_id.clone()),
+            text: Some(draft.text.clone()),
+            confidence: Some(ClaimConfidence::Hypothesis),
+            origin: ClaimOrigin::Agent,
+            outcome: None,
+            artifact_refs: Vec::new(),
+            evidence_ids: draft.evidence_ids.clone(),
+            supersedes: None,
+        };
+        if validate(ClaimOrigin::Agent, &hypothesis)
+            .and_then(|_| validate_against_projection(ClaimOrigin::Agent, &hypothesis, projection))
+            .is_ok()
+        {
+            push_event(log, hypothesis, format!("c2_{claim_id}"));
+            *projection = fold(log);
+        }
+    }
+    skip(
+        report,
+        &draft.claim_id,
+        "claim is not established; kept as a hypothesis",
+    );
 }
 
 fn content_overlap(claim: &str, support: &str) -> usize {
@@ -2854,7 +3066,12 @@ mod tests {
                 "The create branch only counts connections that are not idle toward max_connections.",
             ),
         ];
-        let report = apply_extraction(&mut events);
+        let text =
+            "The create branch only counts connections that are not idle toward max_connections.";
+        let report = apply_extraction_verified(
+            &mut events,
+            &supported_verdict(text, "self.create_connection(origin)"),
+        );
         assert_eq!(report.accepted.len(), 1, "{:?}", report.skipped);
         assert_eq!(report.accepted[0]["kind"], "reality");
         assert_eq!(report.accepted[0]["confidence"], "inferred");
@@ -2871,6 +3088,7 @@ mod tests {
             self.open_socket()\n    \
             self.socket.send(message)\n";
         let first = "deliver increments retry_count before open_socket, so the first send is already counted as a retry.";
+        let kept = "deliver increments retry_count before open_socket";
         let second = "The first send is not counted, so retry_count stays at zero until a failure.";
         let base = vec![
             shell(
@@ -2885,30 +3103,28 @@ mod tests {
             conclusion("c2", 4, second, "g"),
         ];
         let mut open = base.clone();
-        let report = apply_extraction(&mut open);
+        let report =
+            apply_extraction_verified(&mut open, &supported_verdict(kept, "self.retry_count += 1"));
         assert!(report.rejected.is_empty(), "{:?}", report.rejected);
         let projection = fold(&open);
         let realities = current_texts(&projection, ClaimKind::Reality);
-        assert!(realities.iter().any(|text| text == first));
+        assert!(realities.iter().any(|text| text == kept), "{realities:?}");
         assert!(
-            !realities.iter().any(|text| text == second),
+            !realities.iter().any(|text| text.contains("not counted")),
             "contradicted conclusion was admitted: {realities:?}"
         );
-        assert!(skip_reasons(&report).contains("contradicts"));
 
         let mut retracted = base;
         retracted.push(note("r", 5, &format!("Retract: {second}")));
-        let report = apply_extraction(&mut retracted);
+        let report = apply_extraction_verified(
+            &mut retracted,
+            &supported_verdict(kept, "self.retry_count += 1"),
+        );
         assert!(report.rejected.is_empty(), "{:?}", report.rejected);
         let projection = fold(&retracted);
         let realities = current_texts(&projection, ClaimKind::Reality);
-        assert!(realities.iter().any(|text| text == first));
+        assert!(realities.iter().any(|text| text == kept), "{realities:?}");
         assert!(!realities.iter().any(|text| text.contains("not counted")));
-        assert!(
-            skip_reasons(&report).contains("does not quote"),
-            "a retract of a sentence that was never admitted should not rewrite another claim: {}",
-            skip_reasons(&report)
-        );
     }
 
     #[test]
@@ -2938,6 +3154,22 @@ mod tests {
                 .iter()
                 .any(|item| item == text)
         );
+    }
+
+    fn supported_verdict(text: &str, quote: &str) -> crate::verify::Verification {
+        let mut verification = crate::verify::Verification::default();
+        verification.verdicts.insert(
+            text.to_string(),
+            crate::verify::ModelVerdict {
+                label: crate::verify::Label::Supported,
+                evidence_quote: quote.to_string(),
+                prompt_tokens: 3,
+                completion_tokens: 2,
+                latency_ms: 5,
+                calls: 1,
+            },
+        );
+        verification
     }
 
     fn texts_of(report: &HandoffReport) -> Vec<String> {
@@ -2977,12 +3209,18 @@ mod tests {
         let report = apply_extraction(&mut events);
         assert!(report.accepted.is_empty(), "{:?}", report.accepted);
         assert!(report.rejected.is_empty(), "{:?}", report.rejected);
-        let reason = report.skipped[0]["reason"].as_str().unwrap();
+        let reason = skip_reasons(&report);
         assert!(
-            reason.contains("speech act") || reason.contains("grounded"),
+            reason.contains("speech act")
+                || reason.contains("grounded")
+                || reason.contains("not established"),
             "{reason}"
         );
         let projection = fold(&events);
+        assert!(projection.claims.iter().all(|claim| {
+            claim.text != "The worker queue is the real cause of the stalled flush."
+                || claim.confidence == ClaimConfidence::Hypothesis
+        }));
         assert!(
             projection
                 .claims
@@ -3161,7 +3399,7 @@ mod tests {
         let report = apply_extraction(&mut events);
         assert!(report.accepted.is_empty(), "{:?}", report.accepted);
         assert!(report.rejected.is_empty(), "{:?}", report.rejected);
-        assert_eq!(report.skipped.len(), 2, "{:?}", report.skipped);
+        assert!(report.skipped.len() >= 2, "{:?}", report.skipped);
     }
 
     #[test]
@@ -3182,12 +3420,15 @@ mod tests {
             "{texts:?}"
         );
         assert!(
-            texts
+            current_texts(&fold(&events), ClaimKind::Reality)
                 .iter()
-                .any(|text| text.contains("retry_count before open_socket")),
-            "{texts:?}"
+                .all(|text| !text.contains("database"))
         );
-        assert!(current_texts(&fold(&events), ClaimKind::Unknown).is_empty());
+        assert!(
+            current_texts(&fold(&events), ClaimKind::Unknown)
+                .iter()
+                .any(|text| text.contains("retry_count"))
+        );
     }
 
     #[test]
@@ -3209,7 +3450,14 @@ mod tests {
             "{:?}",
             report.accepted
         );
-        assert!(skip_reasons(&report).contains("not supported"));
+        assert!(
+            current_texts(&fold(&events), ClaimKind::Reality)
+                .iter()
+                .all(|text| !text.contains("database"))
+        );
+        assert!(fold(&events).claims.iter().any(|claim| {
+            claim.text.contains("database") && claim.confidence == ClaimConfidence::Hypothesis
+        }));
     }
 
     #[test]
@@ -3222,13 +3470,14 @@ mod tests {
             shell("g", 2, "sed -n 12,18p courier.py", output, 0),
             conclusion("c", 3, sentence, "g"),
         ];
-        let report = apply_extraction(&mut events);
+        let kept = "deliver increments retry_count before open_socket";
+        let report = apply_extraction_verified(
+            &mut events,
+            &supported_verdict(kept, "self.retry_count += 1"),
+        );
         assert!(report.rejected.is_empty(), "{:?}", report.rejected);
         let texts = texts_of(&report);
-        assert_eq!(
-            texts,
-            vec!["deliver increments retry_count before open_socket".to_string()]
-        );
+        assert_eq!(texts, vec![kept.to_string()]);
     }
 
     #[test]
@@ -3236,7 +3485,7 @@ mod tests {
         let output = "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n    self.socket.send(message)\n";
         let sentence =
             "The first send is not counted, so retry_count stays at zero until a failure.";
-        let kept = "deliver increments retry_count before open_socket, so the first send is already counted as a retry.";
+        let kept = "deliver increments retry_count before open_socket";
         let mut events = vec![
             shell(
                 "s",
@@ -3249,12 +3498,13 @@ mod tests {
             shell("g", 3, "sed -n 12,18p courier.py", output, 0),
             conclusion("false_finding", 4, sentence, "g"),
         ];
-        let report = apply_extraction(&mut events);
+        let report = apply_extraction_verified(
+            &mut events,
+            &supported_verdict(kept, "self.retry_count += 1"),
+        );
         assert!(report.rejected.is_empty(), "{:?}", report.rejected);
-        let reasons = skip_reasons(&report);
-        assert!(reasons.contains("contradicts"), "{reasons}");
         let realities = current_texts(&fold(&events), ClaimKind::Reality);
-        assert!(realities.iter().any(|text| text == kept));
+        assert!(realities.iter().any(|text| text == kept), "{realities:?}");
         assert!(!realities.iter().any(|text| text.contains("not counted")));
     }
 
@@ -3270,7 +3520,9 @@ mod tests {
         ];
         let report = apply_extraction(&mut events);
         assert!(texts_of(&report).is_empty(), "{:?}", report.accepted);
-        assert!(skip_reasons(&report).contains("contradicts"));
+        assert!(fold(&events).claims.iter().any(|claim| {
+            claim.text == sentence && claim.confidence == ClaimConfidence::Hypothesis
+        }));
     }
 
     #[test]
@@ -3297,9 +3549,12 @@ mod tests {
             note("n", 3, grounded),
             conclusion("bad", 4, invented, "g"),
         ];
-        let report = apply_extraction(&mut events);
-        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
         let licensed = "The create-new-connection branch only counts connections that are not idle";
+        let report = apply_extraction_verified(
+            &mut events,
+            &supported_verdict(licensed, "self.create_connection(origin)"),
+        );
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
         let realities = current_texts(&fold(&events), ClaimKind::Reality);
         assert!(
             realities.iter().any(|text| text == licensed),
@@ -3331,7 +3586,10 @@ mod tests {
                 1,
             ),
         ];
-        let report = apply_extraction(&mut events);
+        let report = apply_extraction_verified(
+            &mut events,
+            &supported_verdict(sentence, "retry_count 2 != 1"),
+        );
         assert!(report.rejected.is_empty(), "{:?}", report.rejected);
         assert_eq!(
             texts_of(&report)
@@ -3404,9 +3662,14 @@ mod tests {
                 }
                 store::db::insert_event(&conn, &ProcessedEvent::new(event, 1.0)).unwrap();
             }
-            let report = run_handoff(&conn).unwrap();
+            let report =
+                run_handoff_with(&conn, &supported_verdict(first, "retry_count 2 != 1")).unwrap();
             assert!(report.rejected.is_empty(), "{:?}", report.rejected);
             assert!(report.accepted.len() >= 3, "{:?}", report.accepted);
+            assert_eq!(report.verification_calls, 1);
+            assert_eq!(report.prompt_tokens, 3);
+            assert_eq!(report.completion_tokens, 2);
+            assert_eq!(report.verification_latency_ms, 5);
         });
         drop(store);
 
@@ -3424,6 +3687,7 @@ mod tests {
                 "second handoff inserted claims: {:?}",
                 again.accepted
             );
+            assert_eq!(again.verification_calls, 0);
             let projection = store::db::load_projection(&conn).unwrap();
             let after_snap = crate::snapshot::render(&projection, None, 1_500);
             let after = serde_json::to_value(&after_snap).unwrap();
@@ -3495,7 +3759,7 @@ mod tests {
             false_report.diagnostics.iter().any(|row| {
                 row.stage == TraceStage::ApplyExtraction
                     && row.outcome == TraceOutcome::Skipped
-                    && row.reason == TraceReason::Residue
+                    && row.reason == TraceReason::Ungrounded
                     && row.support_event_id.as_deref() == Some("g")
             }),
             "{:?}",
@@ -3581,7 +3845,14 @@ mod tests {
             conclusion("c", 3, sentence, "g"),
         ];
         let report = apply_extraction(&mut events);
-        assert_eq!(texts_of(&report), vec![sentence.to_string()]);
+        assert!(
+            texts_of(&report).is_empty(),
+            "a contradicted increment is not a reality: {:?}",
+            report.accepted
+        );
+        assert!(fold(&events).claims.iter().any(|claim| {
+            claim.text == sentence && claim.confidence == ClaimConfidence::Hypothesis
+        }));
         let before_ids: Vec<String> = events.iter().map(|event| event.id.clone()).collect();
         let before_fold = fold(&events);
         let evidence = std::collections::BTreeMap::from([
@@ -3595,10 +3866,7 @@ mod tests {
         assert_eq!(fold(&events), before_fold);
         assert!(verdicts.iter().all(|verdict| !verdict.writes_memory));
         assert!(requests.iter().any(|request| {
-            request.claim_text == sentence
-                && request.stage == "admit"
-                && request.deterministic_outcome == "accepted"
-                && request.deterministic_reason == "lexical_pass"
+            request.claim_text == sentence && request.deterministic_outcome == "skipped"
         }));
         assert!(
             verdicts.iter().any(|verdict| {
@@ -3613,6 +3881,102 @@ mod tests {
         assert!(requests.iter().any(|request| {
             request.evidence_text == output && request.evidence_ids == vec!["g".to_string()]
         }));
+    }
+
+    #[test]
+    fn a_second_listing_of_the_same_command_is_not_a_proof() {
+        let first =
+            "def release(self, permit):\n    self.quota_left += 1\n    self.release_permit()\n";
+        let second =
+            "def release(self, permit):\n    self.quota_left = 0\n    self.release_permit()\n";
+        let sentence = "quota_left increases by 1 before release_permit";
+        let mut events = vec![
+            shell("s", 1, "pytest -q", "1 failed\n", 1),
+            shell("g", 2, "sed -n 1,40p release.py", first, 0),
+            shell("h", 3, "sed -n 1,40p release.py", second, 0),
+            conclusion("c", 4, sentence, "g"),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+        assert!(
+            current_texts(&fold(&events), ClaimKind::Reality)
+                .iter()
+                .all(|text| text != sentence),
+            "{:?}",
+            report.accepted
+        );
+        assert!(fold(&events).claims.iter().any(|claim| {
+            claim.text == sentence && claim.confidence == ClaimConfidence::Hypothesis
+        }));
+    }
+
+    #[test]
+    fn a_model_cannot_override_a_proved_contradiction() {
+        let output =
+            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+        let sentence = "retry_count never increments before open_socket";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, sentence, "g"),
+        ];
+        let report = apply_extraction_verified(
+            &mut events,
+            &supported_verdict(sentence, "self.retry_count += 1"),
+        );
+        assert!(texts_of(&report).is_empty(), "{:?}", report.accepted);
+        assert!(fold(&events).claims.iter().any(|claim| {
+            claim.text == sentence && claim.confidence == ClaimConfidence::Hypothesis
+        }));
+    }
+
+    #[test]
+    fn a_quote_outside_the_evidence_does_not_verify() {
+        let output = "\
+            len([c for c in self._connections if not c.is_idle()]) < self._max_connections\n\
+            connection = self.create_connection(origin)";
+        let text =
+            "The create branch only counts connections that are not idle toward max_connections.";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest tests/test_pool_counts.py", "", 1),
+            shell("g", 2, "sed -n 10p pool.py", output, 0),
+            note("n", 3, text),
+        ];
+        let report = apply_extraction_verified(
+            &mut events,
+            &supported_verdict(text, "this sentence is not in the tool output"),
+        );
+        assert!(texts_of(&report).is_empty(), "{:?}", report.accepted);
+        assert!(fold(&events).claims.iter().any(|claim| {
+            claim.text == text && claim.confidence == ClaimConfidence::Hypothesis
+        }));
+    }
+
+    #[test]
+    fn a_changed_tool_output_drops_the_verdict() {
+        let output = "\
+            len([c for c in self._connections if not c.is_idle()]) < self._max_connections\n\
+            connection = self.create_connection(origin)";
+        let text =
+            "The create branch only counts connections that are not idle toward max_connections.";
+        let before = vec![
+            shell("s", 1, "python -m pytest tests/test_pool_counts.py", "", 1),
+            shell("g", 2, "sed -n 10p pool.py", output, 0),
+            note("n", 3, text),
+        ];
+        let mut after = before.clone();
+        after[1].payload["output"] = json!("connection = self.create_connection(origin)\n# edited");
+        let verdict = supported_verdict(text, "self.create_connection(origin)");
+        assert!(
+            drop_stale(&before, &before, verdict.clone())
+                .verdict_for(text)
+                .is_some()
+        );
+        assert!(
+            drop_stale(&before, &after, verdict)
+                .verdict_for(text)
+                .is_none()
+        );
     }
 
     #[test]

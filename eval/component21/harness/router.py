@@ -20,7 +20,16 @@ _LITERAL_BEFORE = re.compile(
     rf"^(?P<left>{_IDENT}) (?:increases|increments) by (?P<amount>\d+) before (?P<right>{_IDENT})$",
     re.IGNORECASE,
 )
+_LITERAL_DECREASE = re.compile(
+    rf"^(?P<left>{_IDENT}) (?:decreases|decrements) by (?P<amount>\d+) before (?P<right>{_IDENT})$",
+    re.IGNORECASE,
+)
 _NEGATED = re.compile(rf"\b(?P<left>{_IDENT}) never (?:increases|increments)\b", re.IGNORECASE)
+_NEGATED_DECREASE = re.compile(
+    rf"\b(?P<left>{_IDENT}) never (?:decreases|decrements)\b",
+    re.IGNORECASE,
+)
+_INCOMPLETE = re.compile(r"\btruncated\b|\boutput removed\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -37,13 +46,16 @@ def route_claim(claim: str, evidence: str) -> RouteDecision:
     text = claim.strip()
     if _missing(evidence):
         return RouteDecision("abstain", "INSUFFICIENT_EVIDENCE", "missing_evidence", "high")
+    if _incomplete(evidence):
+        return RouteDecision("abstain", "INSUFFICIENT_EVIDENCE", "incomplete_evidence", "high")
     if _conflicting(evidence):
         return RouteDecision("abstain", "INSUFFICIENT_EVIDENCE", "conflicting_evidence", "high")
+    visible = _visible_code(evidence)
     atoms = decompose(text)
     labels: list[str | None] = []
     quotes: list[str] = []
     for index, atom in enumerate(atoms):
-        label, quote = _atom_decision(atom, evidence, primary=index == 0)
+        label, quote = _atom_decision(atom, evidence, visible, primary=index == 0)
         labels.append(label)
         quotes.append(quote)
     if any(label == "CONTRADICTED" for label in labels):
@@ -60,9 +72,16 @@ def route_claim(claim: str, evidence: str) -> RouteDecision:
 def apply_routes(
     rows: list[dict[str, Any]],
     semantic: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
+    *,
+    suites: frozenset[str] | set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Route a batch. Semantic failures abstain and do not propagate."""
-    kept = [row for row in rows if row.get("suite") in EXPERIMENT_SUITES]
+    """Route a batch. Semantic failures abstain and do not propagate.
+
+    The default suites are regression and development. Held-out rows stay out
+    unless the caller passes that suite explicitly for a frozen one-shot run.
+    """
+    allowed = EXPERIMENT_SUITES if suites is None else frozenset(suites)
+    kept = [row for row in rows if row.get("suite") in allowed]
     decisions = [(row, route_claim(str(row.get("claim_text") or ""), str(row.get("evidence_text") or ""))) for row in kept]
     semantic_rows = [row for row, decision in decisions if decision.route == "semantic"]
     semantic_labels: dict[str, dict[str, Any]] = {}
@@ -93,6 +112,9 @@ def apply_routes(
                     "impact": "high" if semantic_error else decision.impact,
                     "writes_memory": False,
                     "llm_calls": _calls(produced),
+                    "prompt_tokens": int(produced.get("prompt_tokens") or 0) if produced else 0,
+                    "completion_tokens": int(produced.get("completion_tokens") or 0) if produced else 0,
+                    "latency_s": float(produced.get("latency_s") or 0) if produced else 0.0,
                 }
             )
             continue
@@ -123,82 +145,185 @@ def _missing(evidence: str) -> bool:
     return not evidence.strip()
 
 
+def _incomplete(evidence: str) -> bool:
+    return _INCOMPLETE.search(evidence) is not None
+
+
 def _conflicting(evidence: str) -> bool:
-    """Two different updates disagree. An initial assignment before the only increment does not."""
+    """Two different updates disagree. An initial assignment before the only change does not."""
+    visible = _visible_code(evidence)
     events: dict[str, list[tuple[int, str]]] = {}
 
     def record(name: str, index: int, kind: str) -> None:
         events.setdefault(name.lower(), []).append((index, kind))
 
-    for match in re.finditer(rf"({_IDENT})\s*\+=\s*(\d+)", evidence):
+    for match in re.finditer(rf"({_IDENT})\s*\+=\s*(\d+)", visible):
         record(match.group(1), match.start(), f"+={match.group(2)}")
-    for match in re.finditer(rf"({_IDENT})\s*\+\+", evidence):
+    for match in re.finditer(rf"({_IDENT})\s*\+\+", visible):
         record(match.group(1), match.start(), "+=1")
-    for match in re.finditer(rf"({_IDENT})\s*=\s*(\d+)", evidence):
+    for match in re.finditer(rf"({_IDENT})\s*-=\s*(\d+)", visible):
+        record(match.group(1), match.start(), f"-={match.group(2)}")
+    for match in re.finditer(rf"({_IDENT})\s*--", visible):
+        record(match.group(1), match.start(), "-=1")
+    for match in re.finditer(rf"({_IDENT})\s*=\s*(\d+)", visible):
         record(match.group(1), match.start(), f"={match.group(2)}")
     for writes in events.values():
         writes.sort()
         adds = [kind for _, kind in writes if kind.startswith("+=")]
-        sets = [kind for _, kind in writes if kind.startswith("=") and not kind.startswith("+=")]
-        if len(set(adds)) > 1 or len(set(sets)) > 1:
+        subs = [kind for _, kind in writes if kind.startswith("-=")]
+        sets = [kind for _, kind in writes if kind[:1] == "="]
+        if len(set(adds)) > 1 or len(set(subs)) > 1 or len(set(sets)) > 1:
             return True
-        if not adds or not sets:
+        if adds and subs:
+            return True
+        changes = [(index, kind) for index, kind in writes if kind[:1] in {"+", "-"}]
+        if not changes or not sets:
             continue
-        first_add = min(index for index, kind in writes if kind.startswith("+="))
-        if any(index > first_add for index, kind in writes if kind.startswith("=") and not kind.startswith("+=")):
+        first_change = min(index for index, _ in changes)
+        if any(index > first_change for index, kind in writes if kind[:1] == "="):
             return True
     return False
 
 
-def _atom_decision(atom: str, evidence: str, *, primary: bool) -> tuple[str | None, str]:
-    if polarity_conflict(atom, evidence):
+def _atom_decision(atom: str, evidence: str, visible: str, *, primary: bool) -> tuple[str | None, str]:
+    if polarity_conflict(atom, visible):
         return "CONTRADICTED", _window_quote(evidence, "not")
     negated = _NEGATED.search(atom)
-    if negated and _shown_amount(negated.group("left"), evidence) is not None:
-        return "CONTRADICTED", _increment_quote(negated.group("left"), evidence)
+    if negated and _amounts(negated.group("left"), visible, "increase"):
+        return "CONTRADICTED", _change_quote(evidence, visible, negated.group("left"), "increase")
+    negated_drop = _NEGATED_DECREASE.search(atom)
+    if negated_drop and _amounts(negated_drop.group("left"), visible, "decrease"):
+        return "CONTRADICTED", _change_quote(evidence, visible, negated_drop.group("left"), "decrease")
     literal = _LITERAL_BEFORE.search(atom.strip())
-    if literal:
-        shown = _shown_amount(literal.group("left"), evidence)
-        claimed = int(literal.group("amount"))
-        if shown is not None and shown != claimed:
-            return "CONTRADICTED", _increment_quote(literal.group("left"), evidence)
-        order = _order(literal.group("left"), literal.group("right"), evidence)
-        if order == "reversed":
-            return "CONTRADICTED", _call_quote(literal.group("right"), evidence)
-        if order == "before" and shown == claimed:
-            return "SUPPORTED", _increment_quote(literal.group("left"), evidence)
+    proved = _literal_change(literal, evidence, visible, "increase") if literal else None
+    if proved is not None:
+        return proved
+    dropped = _LITERAL_DECREASE.search(atom.strip())
+    proved = _literal_change(dropped, evidence, visible, "decrease") if dropped else None
+    if proved is not None:
+        return proved
     if _foreign(atom) and atom not in evidence:
         return "INSUFFICIENT_EVIDENCE", ""
-    if not primary and _content_missing(atom, evidence):
+    if not primary and _content_missing(atom, visible):
         return "INSUFFICIENT_EVIDENCE", ""
     return None, ""
 
 
-def _shown_amount(ident: str, evidence: str) -> int | None:
-    pattern = re.compile(rf"(?i)(?<![A-Za-z0-9_]){re.escape(ident)}\s*(\+=\s*(\d+)|\+\+)")
-    match = pattern.search(evidence)
-    if match is None:
-        return None
-    return 1 if match.group(2) is None else int(match.group(2))
+def _literal_change(
+    literal: re.Match[str],
+    evidence: str,
+    visible: str,
+    direction: str,
+) -> tuple[str, str] | None:
+    """Prove one straight-line update, or refuse it. Ambiguous text is not supported."""
+    amounts = _amounts(literal.group("left"), visible, direction)
+    claimed = int(literal.group("amount"))
+    quote = _change_quote(evidence, visible, literal.group("left"), direction)
+    if len(amounts) == 1 and amounts[0] != claimed:
+        return "CONTRADICTED", quote
+    order = _order(literal.group("left"), literal.group("right"), visible)
+    if order == "reversed" and amounts:
+        return "CONTRADICTED", _call_quote(evidence, visible, literal.group("right"))
+    if order == "before" and amounts == [claimed]:
+        return "SUPPORTED", quote
+    return None
 
 
-_BRANCH = re.compile(r"\b(?:if|else|elif|switch|case|match)\b")
+_BRANCH = re.compile(r"\b(?:if|else|elif|for|while|switch|case|match|try|except|catch|loop)\b")
 _FUNCTION = re.compile(r"(?m)^[ \t]*(?:async[ \t]+def|def|fn|func|function)\b")
+_CONTROL_LINE = re.compile(
+    r"^[ \t]*(?:if|else|elif|for|while|switch|case|match|try|except|catch|loop)\b",
+    re.IGNORECASE,
+)
+_FUNCTION_LINE = re.compile(r"^[ \t]*(?:async[ \t]+def|def|fn|func|function)\b")
 
 
-def _order(left: str, right: str, evidence: str) -> str | None:
-    increment = re.search(
-        rf"(?i)(?<![A-Za-z0-9_]){re.escape(left)}\s*(?:\+=\s*\d+|\+\+)",
-        evidence,
-    )
-    call = re.search(rf"(?i)(?<![A-Za-z0-9_]){re.escape(right)}\s*\(", evidence)
+def _amounts(ident: str, visible: str, direction: str) -> list[int]:
+    amounts = []
+    for match in _change_pattern(ident, direction).finditer(visible):
+        amounts.append(1 if match.group(1) is None else int(match.group(1)))
+    return amounts
+
+
+def _change_pattern(ident: str, direction: str) -> re.Pattern[str]:
+    if direction == "increase":
+        body = r"\+=\s*(\d+)|\+\+"
+    else:
+        body = r"-=\s*(\d+)|--"
+    return re.compile(rf"(?i)(?<![A-Za-z0-9_]){re.escape(ident)}\s*(?:{body})")
+
+
+def _change_quote(original: str, visible: str, ident: str, direction: str) -> str:
+    match = _change_pattern(ident, direction).search(visible)
+    if match is None:
+        return ""
+    return original[match.start() : match.end()]
+
+
+def _order(left: str, right: str, visible: str) -> str | None:
+    increment = _change_pattern(left, "increase").search(visible) or _change_pattern(left, "decrease").search(visible)
+    call = re.search(rf"(?i)(?<![A-Za-z0-9_]){re.escape(right)}\s*\(", visible)
     if increment is None or call is None:
         return None
-    if not _shared_straight_line(evidence, increment.start(), call.start()):
+    if not _straight_proof(visible, increment.start(), call.start()):
         return None
     if call.start() < increment.start():
         return "reversed"
     return "before"
+
+
+def _straight_proof(visible: str, left: int, right: int) -> bool:
+    """True only when both sites are siblings directly under one function.
+
+    A loop, a branch, a comment, or another function is not a proof. Those
+    claims stay on the semantic route.
+    """
+    if not _shared_straight_line(visible, left, right):
+        return False
+    lines = _line_table(visible)
+    earlier = _line_index(lines, min(left, right))
+    later = _line_index(lines, max(left, right))
+    indent = _indent(lines[earlier][1])
+    if _indent(lines[later][1]) != indent:
+        return False
+    for offset, line in lines[earlier : later + 1]:
+        del offset
+        if not line.strip():
+            continue
+        if _indent(line) != indent or _CONTROL_LINE.match(line):
+            return False
+    header = _enclosing_header(lines, earlier, indent)
+    return header is not None and _FUNCTION_LINE.match(header) is not None
+
+
+def _line_table(text: str) -> list[tuple[int, str]]:
+    rows = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        rows.append((offset, line))
+        offset += len(line)
+    return rows or [(0, text)]
+
+
+def _line_index(lines: list[tuple[int, str]], index: int) -> int:
+    for position, (offset, line) in enumerate(lines):
+        if offset <= index < offset + max(len(line), 1):
+            return position
+    return max(0, len(lines) - 1)
+
+
+def _indent(line: str) -> str:
+    stripped = line.lstrip(" \t")
+    return line[: len(line) - len(stripped)]
+
+
+def _enclosing_header(lines: list[tuple[int, str]], index: int, indent: str) -> str | None:
+    for _, line in reversed(lines[:index]):
+        if not line.strip():
+            continue
+        if len(_indent(line)) < len(indent):
+            return line
+    return None
 
 
 def _shared_straight_line(evidence: str, left: int, right: int) -> bool:
@@ -215,17 +340,55 @@ def _brace_depth(text: str, index: int) -> int:
     return snippet.count("{") - snippet.count("}")
 
 
-def _call_quote(ident: str, evidence: str) -> str:
-    match = re.search(rf"(?i)(?<![A-Za-z0-9_]){re.escape(ident)}\s*\(", evidence)
-    return match.group(0) if match else ""
+def _call_quote(original: str, visible: str, ident: str) -> str:
+    match = re.search(rf"(?i)(?<![A-Za-z0-9_]){re.escape(ident)}\s*\(", visible)
+    if match is None:
+        return ""
+    return original[match.start() : match.end()]
 
 
-def _increment_quote(ident: str, evidence: str) -> str:
-    match = re.search(
-        rf"(?i)(?<![A-Za-z0-9_]){re.escape(ident)}\s*(?:\+=\s*\d+|\+\+)",
-        evidence,
-    )
-    return match.group(0) if match else ""
+def _visible_code(evidence: str) -> str:
+    """Blank comments and string contents without moving the remaining columns."""
+    chars = list(evidence)
+    index = 0
+    limit = len(evidence)
+    while index < limit:
+        pair = evidence[index : index + 2]
+        if pair in {"//", "/*"} or evidence[index] == "#":
+            if pair == "/*":
+                chars[index] = chars[index + 1] = " "
+                index += 2
+                while index < limit and evidence[index - 1 : index + 1] != "*/":
+                    if evidence[index] != "\n":
+                        chars[index] = " "
+                    index += 1
+                if index < limit:
+                    chars[index] = " "
+                    index += 1
+                continue
+            while index < limit and evidence[index] != "\n":
+                chars[index] = " "
+                index += 1
+            continue
+        if evidence[index] in {'"', "'", "`"}:
+            quote = evidence[index]
+            chars[index] = " "
+            index += 1
+            while index < limit and evidence[index] != quote:
+                if evidence[index] == "\\" and index + 1 < limit:
+                    chars[index] = " "
+                    chars[index + 1] = " "
+                    index += 2
+                    continue
+                if evidence[index] != "\n":
+                    chars[index] = " "
+                index += 1
+            if index < limit:
+                chars[index] = " "
+                index += 1
+            continue
+        index += 1
+    return "".join(chars)
 
 
 def _window_quote(evidence: str, needle: str) -> str:

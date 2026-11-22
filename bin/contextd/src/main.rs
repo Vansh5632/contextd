@@ -82,11 +82,8 @@ async fn answer_query(
 
     let result = match &request {
         ContextRequest::Now { text: _ } => {
-            {
-                let conn = tiers.store.writer().await;
-                if let Err(error) = broker::extract::run_handoff(&conn) {
-                    error!("handoff before context_now failed: {error}");
-                }
+            if let Err(error) = verified_handoff(tiers).await {
+                error!("handoff before context_now failed: {error}");
             }
             broker::snapshot::build(
                 broker::snapshot::SnapshotRequest::new(store, "")
@@ -127,12 +124,9 @@ async fn answer_query(
             )
             .await
         }
-        ContextRequest::Handoff => {
-            let conn = tiers.store.writer().await;
-            broker::extract::run_handoff(&conn)
-                .map_err(anyhow::Error::from)
-                .and_then(|report| Ok(serde_json::to_value(report)?))
-        }
+        ContextRequest::Handoff => verified_handoff(tiers)
+            .await
+            .and_then(|report| Ok(serde_json::to_value(report)?)),
         ContextRequest::Search { text, limit } => {
             let limit = ContextRequest::resolve_limit(*limit);
             broker::search::search(store, ollama, text, limit)
@@ -161,6 +155,20 @@ async fn answer_query(
         Ok(value) => value.to_string(),
         Err(error) => serde_json::json!({ "error": error.to_string() }).to_string(),
     }
+}
+
+async fn verified_handoff(tiers: &Tiers) -> anyhow::Result<broker::extract::HandoffReport> {
+    let before = {
+        let conn = tiers.store.reader()?;
+        store::db::get_handoff_events(&conn)?
+    };
+    let requests = broker::extract::semantic_requests(&before);
+    // The model call finishes before the writer lock is taken.
+    let verdicts = broker::verify::classify_semantic(&requests).await;
+    let conn = tiers.store.writer().await;
+    let after = store::db::get_handoff_events(&conn)?;
+    let verdicts = broker::extract::drop_stale(&before, &after, verdicts);
+    broker::extract::run_handoff_with(&conn, &verdicts).map_err(anyhow::Error::from)
 }
 
 async fn current_projection(tiers: &Tiers) -> anyhow::Result<Projection> {
