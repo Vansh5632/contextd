@@ -63,7 +63,7 @@ A focal task groups intent, reality, decisions, ruled-out approaches, unknowns, 
 [claim.rs](../crates/core/src/claim.rs) validates the write contract:
 
 - User intent and user-stated constraints/decisions/ruled-out approaches use the CLI/socket user path.
-- MCP `note_claim` records agent `inferred` or `hypothesis` claims, never user constraints, intent, or `observed` facts. Unknowns are hypotheses. This direct authored-claim path has no automatic tool evidence and does not run Component 2.1 extraction/grounding; it validates the core origin/kind/confidence contract.
+- MCP `note_claim` records agent `inferred` or `hypothesis` claims, never user constraints, intent, or `observed` facts. Unknowns are hypotheses. A `reality` on this path has no tool evidence, so it is stored as a hypothesis. The path does not run Component 2.1 extraction.
 - Observed command outcomes belong to the projector. An agent conclusion passing extraction remains an inferred claim.
 - Claims carry provenance; consumers still need to check them against the repository and current task.
 

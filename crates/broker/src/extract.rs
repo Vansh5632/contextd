@@ -263,6 +263,7 @@ pub enum TraceReason {
     Question,
     UpdateMiss,
     Truncated,
+    IncompleteEvidence,
 }
 
 impl TraceReason {
@@ -301,6 +302,7 @@ impl TraceReason {
             Self::Question => "question",
             Self::UpdateMiss => "update_miss",
             Self::Truncated => "truncated",
+            Self::IncompleteEvidence => "incomplete_evidence",
         }
     }
 
@@ -339,6 +341,7 @@ impl TraceReason {
             "question" => Self::Question,
             "update_miss" => Self::UpdateMiss,
             "truncated" => Self::Truncated,
+            "incomplete_evidence" => Self::IncompleteEvidence,
             other => panic!("unknown trace reason {other}"),
         }
     }
@@ -512,6 +515,7 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
     let mut projection = fold(log);
     let mut report = HandoffReport::default();
     let mut diagnostics = Vec::new();
+    withdraw_incomplete_realities(log, &mut projection, &mut report, &mut diagnostics);
 
     for index in 0..original_len {
         let event = log[index].clone();
@@ -591,6 +595,7 @@ pub fn apply_extraction(log: &mut Vec<RawEvent>) -> HandoffReport {
                     | "unanchored"
                     | "low_overlap"
                     | "empty_support"
+                    | "incomplete_evidence"
             );
             trace_cited(
                 &mut diagnostics,
@@ -1923,6 +1928,9 @@ fn relation_decision(sentence: &str, support: &str) -> (&'static str, EvidenceRe
     if support.trim().is_empty() {
         return ("empty_support", EvidenceRelation::Insufficient);
     }
+    if support_is_incomplete(support) {
+        return ("incomplete_evidence", EvidenceRelation::Insufficient);
+    }
     if polarity_contradiction(sentence, support) {
         return ("polarity", EvidenceRelation::Contradicted);
     }
@@ -2008,6 +2016,9 @@ fn clause_decision(clause: &str, sentence: &str, support: &str) -> (&'static str
     }
     if support.trim().is_empty() {
         return ("empty_support", false);
+    }
+    if support_is_incomplete(support) {
+        return ("incomplete_evidence", false);
     }
     if let Some(reason) = contradiction_reason(clause, sentence, support) {
         return (reason, false);
@@ -2123,7 +2134,9 @@ fn relation_for_reason(reason: &str) -> &'static str {
     match reason {
         "lexical_pass" => "supported",
         "polarity" | "order" => "contradicted",
-        "residue" | "unanchored" | "low_overlap" | "empty_support" => "insufficient",
+        "residue" | "unanchored" | "low_overlap" | "empty_support" | "incomplete_evidence" => {
+            "insufficient"
+        }
         _ => "not_applicable",
     }
 }
@@ -2348,20 +2361,21 @@ fn push_ident(tokens: &mut Vec<String>, token: &str) {
 }
 
 fn evidence_clauses(sentence: &str) -> Vec<String> {
-    let mut clauses = Vec::new();
-    let lower = sentence.to_lowercase();
-    let mut start = 0;
     let markers = [" so ", " because ", " means ", " and ", " but "];
-    while start < sentence.len() {
-        let remainder = &lower[start..];
+    let (lower, origins) = lowercase_origins(sentence);
+    let mut clauses = Vec::new();
+    let mut lower_start = 0usize;
+    while lower_start < lower.len() {
+        let remainder = &lower[lower_start..];
         let next = markers
             .iter()
             .filter_map(|marker| remainder.find(marker).map(|index| (index, marker.len())))
             .min_by_key(|(index, _)| *index);
         let (end, marker_len) = next
-            .map(|(index, len)| (start + index, len))
-            .unwrap_or((sentence.len(), 0));
-        let clause = sentence[start..end]
+            .map(|(index, len)| (lower_start + index, len))
+            .unwrap_or((lower.len(), 0));
+        let clause = sentence[original_at(&origins, lower_start, sentence.len())
+            ..original_at(&origins, end, sentence.len())]
             .trim()
             .trim_matches(|ch: char| ch == ',' || ch == ';');
         if !clause.is_empty() {
@@ -2370,9 +2384,141 @@ fn evidence_clauses(sentence: &str) -> Vec<String> {
         if marker_len == 0 {
             break;
         }
-        start = end + marker_len;
+        lower_start = end + marker_len;
     }
     clauses
+}
+
+/// Lowercase text plus the original byte offset of each lowercase byte.
+///
+/// `Ω` is three bytes and lowercases to `ω`, which is two. Searching the
+/// lowercase copy and slicing the original with those indexes panics.
+fn lowercase_origins(text: &str) -> (String, Vec<usize>) {
+    let mut lower = String::new();
+    let mut origins = Vec::new();
+    for (offset, ch) in text.char_indices() {
+        for lower_ch in ch.to_lowercase() {
+            lower.push(lower_ch);
+            origins.resize(lower.len(), offset);
+        }
+    }
+    (lower, origins)
+}
+
+fn original_at(origins: &[usize], lower_index: usize, sentence_len: usize) -> usize {
+    if lower_index >= origins.len() {
+        sentence_len
+    } else {
+        origins[lower_index]
+    }
+}
+
+fn support_is_incomplete(support: &str) -> bool {
+    support.contains(TRUNCATION_MARK)
+}
+
+fn claim_has_complete_shell(claim: &Claim, log: &[RawEvent]) -> bool {
+    claim.evidence_ids.iter().any(|id| {
+        event_by_id(log, id).is_some_and(|event| {
+            event.source == EventSource::Shell && {
+                let output = payload_str(event, "output");
+                !output.trim().is_empty() && !support_is_incomplete(&output)
+            }
+        })
+    })
+}
+
+/// A reality whose tool output was cut off or removed is no longer established.
+///
+/// The sentence is kept as a hypothesis so the wording is not thrown away.
+fn withdraw_incomplete_realities(
+    log: &mut Vec<RawEvent>,
+    projection: &mut Projection,
+    report: &mut HandoffReport,
+    diagnostics: &mut Vec<DecisionTrace>,
+) {
+    let stale: Vec<Claim> = projection
+        .claims
+        .iter()
+        .filter(|claim| {
+            claim.status == ClaimStatus::Current
+                && claim.origin == ClaimOrigin::Agent
+                && claim.kind == ClaimKind::Reality
+                && claim.confidence != ClaimConfidence::Hypothesis
+                && !claim_has_complete_shell(claim, log)
+        })
+        .cloned()
+        .collect();
+    for claim in stale {
+        let hypothesis_id = format!("unverified_{}", claim.id);
+        if projection.claims.iter().any(|current| {
+            current.status == ClaimStatus::Current
+                && current.confidence == ClaimConfidence::Hypothesis
+                && current.text == claim.text
+                && current.task_id == claim.task_id
+        }) {
+            continue;
+        }
+        trace(
+            diagnostics,
+            "admit",
+            &claim.text,
+            "rejected",
+            "incomplete_evidence",
+            "insufficient",
+        );
+        let supersede = ClaimEvent {
+            op: ClaimOp::Supersede,
+            claim_id: format!("incomplete_{}", claim.id),
+            task_id: claim.task_id.clone(),
+            kind: None,
+            subject: None,
+            text: None,
+            confidence: None,
+            origin: ClaimOrigin::Agent,
+            outcome: None,
+            artifact_refs: Vec::new(),
+            evidence_ids: claim.evidence_ids.clone(),
+            supersedes: Some(claim.id.clone()),
+        };
+        if validate(ClaimOrigin::Agent, &supersede)
+            .and_then(|_| validate_against_projection(ClaimOrigin::Agent, &supersede, projection))
+            .is_err()
+        {
+            continue;
+        }
+        push_event(log, supersede, format!("c2_incomplete_{}", claim.id));
+        *projection = fold(log);
+        let hypothesis = ClaimEvent {
+            op: ClaimOp::Assert,
+            claim_id: hypothesis_id.clone(),
+            task_id: claim.task_id.clone(),
+            kind: Some(ClaimKind::Unknown),
+            subject: Some(hypothesis_id.clone()),
+            text: Some(claim.text.clone()),
+            confidence: Some(ClaimConfidence::Hypothesis),
+            origin: ClaimOrigin::Agent,
+            outcome: None,
+            artifact_refs: Vec::new(),
+            evidence_ids: claim.evidence_ids.clone(),
+            supersedes: None,
+        };
+        if validate(ClaimOrigin::Agent, &hypothesis)
+            .and_then(|_| validate_against_projection(ClaimOrigin::Agent, &hypothesis, projection))
+            .is_err()
+        {
+            continue;
+        }
+        push_event(log, hypothesis, format!("c2_{hypothesis_id}"));
+        *projection = fold(log);
+        report.accepted.push(json!({
+            "claim_id": hypothesis_id,
+            "kind": "unknown",
+            "confidence": "hypothesis",
+            "text": claim.text,
+            "evidence_ids": claim.evidence_ids,
+        }));
+    }
 }
 
 fn clause_unanchored(sentence: &str, support: &str) -> bool {
@@ -3497,5 +3643,132 @@ mod tests {
         let mut report = HandoffReport::default();
         finish_diagnostics(&mut report, rows);
         assert!(report.diagnostics_truncated);
+    }
+
+    fn current_realities(log: &[RawEvent]) -> Vec<Claim> {
+        fold(log)
+            .claims
+            .into_iter()
+            .filter(|claim| {
+                claim.status == ClaimStatus::Current
+                    && claim.kind == ClaimKind::Reality
+                    && claim.confidence == ClaimConfidence::Inferred
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_f05_omega_note_does_not_panic_and_survives_a_restart() {
+        let output =
+            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+        let panic_note = "Ω so retry_count increments before open_socket";
+        let expanded = "İ so retry_count increments before open_socket";
+        assert!(evidence_clauses(panic_note).len() >= 2);
+        assert!(evidence_clauses(expanded).len() >= 2);
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, panic_note, "g"),
+        ];
+        let first = apply_extraction(&mut events);
+        assert!(
+            texts_of(&first).iter().all(|text| !text.contains('Ω')),
+            "the omega prefix is not a verified clause: {:?}",
+            first.accepted
+        );
+        let before = current_realities(&events);
+        let second = apply_extraction(&mut events);
+        assert!(
+            second.accepted.is_empty()
+                || second.accepted.iter().all(|row| row["kind"] != "reality")
+        );
+        assert_eq!(current_realities(&events), before);
+    }
+
+    #[test]
+    fn a_truncated_listing_does_not_verify_the_visible_prefix() {
+        let output = format!("self.retry_count += 1\nself.open_socket()\n{TRUNCATION_MARK}");
+        let sentence = "retry_count increments before open_socket";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 1,220p courier.py", &output, 0),
+            conclusion("c", 3, sentence, "g"),
+        ];
+        let report = apply_extraction(&mut events);
+        assert!(
+            current_realities(&events).is_empty(),
+            "truncated output admitted {:?}; report {:?}",
+            texts_of(&report),
+            report.diagnostics
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|row| { row.reason == TraceReason::IncompleteEvidence })
+        );
+        let again = apply_extraction(&mut events);
+        assert!(
+            current_realities(&events).is_empty(),
+            "{:?}",
+            again.accepted
+        );
+    }
+
+    #[test]
+    fn a_restart_withdraws_a_reality_after_its_output_is_cut_off() {
+        let output =
+            "def deliver(self, message):\n    self.retry_count += 1\n    self.open_socket()\n";
+        let sentence = "retry_count increments before open_socket";
+        let mut events = vec![
+            shell("s", 1, "python -m pytest -q tests/test_retry.py", "fail", 1),
+            shell("g", 2, "sed -n 12,18p courier.py", output, 0),
+            conclusion("c", 3, sentence, "g"),
+        ];
+        let admitted = apply_extraction(&mut events);
+        assert_eq!(texts_of(&admitted), vec![sentence.to_string()]);
+        let shell_event = events.iter_mut().find(|event| event.id == "g").unwrap();
+        shell_event.payload["output"] = json!(format!("{output}{TRUNCATION_MARK}"));
+        let withdrawn = apply_extraction(&mut events);
+        assert!(
+            current_realities(&events).is_empty(),
+            "{:?}",
+            withdrawn.accepted
+        );
+        assert!(fold(&events).claims.iter().any(|claim| {
+            claim.status == ClaimStatus::Current
+                && claim.confidence == ClaimConfidence::Hypothesis
+                && claim.text == sentence
+        }));
+        let replay = apply_extraction(&mut events);
+        assert!(
+            current_realities(&events).is_empty(),
+            "{:?}",
+            replay.accepted
+        );
+        assert_eq!(
+            fold(&events)
+                .claims
+                .iter()
+                .filter(|claim| claim.status == ClaimStatus::Current)
+                .map(|claim| claim.id.clone())
+                .collect::<Vec<_>>(),
+            {
+                let third = apply_extraction(&mut events);
+                assert!(
+                    third.accepted.is_empty()
+                        || third
+                            .accepted
+                            .iter()
+                            .all(|row| row["confidence"] != "inferred")
+                );
+                fold(&events)
+                    .claims
+                    .iter()
+                    .filter(|claim| claim.status == ClaimStatus::Current)
+                    .map(|claim| claim.id.clone())
+                    .collect::<Vec<_>>()
+            }
+        );
     }
 }

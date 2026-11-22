@@ -74,7 +74,7 @@ Search/recall take `text` and an optional `limit` (default 10, clamped to 1–50
 
 `context://snapshot/current` exposes the same current briefing with no arguments. The resource contents have `ttlMs: 0`; the resource-list metadata has a separate one-hour TTL. Support for displaying/attaching a resource depends on the client.
 
-`note_claim` accepts `kind` values `reality`, `decision`, `ruled_out`, `unknown`, or `next_action`; `confidence` is `inferred` (default) or `hypothesis`. Unknowns become hypotheses. `replaces` can identify an earlier eligible agent claim. It cannot author constraints, intent, or observed facts. This direct authored-claim path validates origin/kind/confidence; it does **not** run Component 2.1 evidence grounding or attach tool evidence automatically. A recorded inference still needs checking.
+`note_claim` accepts `kind` values `reality`, `decision`, `ruled_out`, `unknown`, or `next_action`; `confidence` is `inferred` (default) or `hypothesis`. Unknowns become hypotheses. A `reality` sent here has no tool output, so it is stored as a hypothesis rather than an established reality. `replaces` can identify an earlier eligible agent claim. It cannot author constraints, intent, or observed facts. This direct path does not run the evidence check. A conclusion that cites a complete tool observation still goes through handoff.
 
 ## User statements and raw notes
 

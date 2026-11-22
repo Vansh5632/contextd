@@ -438,6 +438,18 @@ pub fn validate(origin: ClaimOrigin, event: &ClaimEvent) -> Result<(), ClaimErro
     Ok(())
 }
 
+/// An agent `reality` has no tool evidence on the direct claim path.
+///
+/// Store it as a hypothesis. A later handoff can still admit the same words
+/// when a complete tool output supports them.
+pub fn as_unverified(kind: ClaimKind, confidence: ClaimConfidence) -> (ClaimKind, ClaimConfidence) {
+    if matches!(kind, ClaimKind::Reality | ClaimKind::Unknown) {
+        (ClaimKind::Unknown, ClaimConfidence::Hypothesis)
+    } else {
+        (kind, confidence)
+    }
+}
+
 /// Rules that need to look at what is currently in force.
 pub fn validate_against_projection(
     origin: ClaimOrigin,
@@ -552,6 +564,22 @@ mod tests {
             asserted_by_event_id: "e1".into(),
             updated_at_ms: 1,
         }
+    }
+
+    #[test]
+    fn an_evidence_free_reality_is_stored_as_a_hypothesis() {
+        let (kind, confidence) = as_unverified(ClaimKind::Reality, ClaimConfidence::Inferred);
+        assert_eq!(kind, ClaimKind::Unknown);
+        assert_eq!(confidence, ClaimConfidence::Hypothesis);
+        let mut event = agent_assert(kind, confidence);
+        event.kind = Some(kind);
+        event.confidence = Some(confidence);
+        assert!(validate(ClaimOrigin::Agent, &event).is_ok());
+        let (decision, inferred) = as_unverified(ClaimKind::Decision, ClaimConfidence::Inferred);
+        assert_eq!(
+            (decision, inferred),
+            (ClaimKind::Decision, ClaimConfidence::Inferred)
+        );
     }
 
     #[test]

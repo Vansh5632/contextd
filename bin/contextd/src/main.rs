@@ -202,7 +202,7 @@ fn write_ok(claim_id: &str, task_id: &str) -> anyhow::Result<serde_json::Value> 
     Ok(serde_json::json!({
         "ok": true,
         "claim_id": claim_id,
-        "task_id": task_id
+        "task_id": task_id,
     }))
 }
 
@@ -366,6 +366,7 @@ async fn record_agent_claim(
     if kind == ClaimKind::Unknown {
         confidence = ClaimConfidence::Hypothesis;
     }
+    let (kind, confidence) = contextd_core::claim::as_unverified(kind, confidence);
     let event_id = mint_event_id();
     let timestamp_ms = now_ms();
     let claim_id = format!("c_{event_id}");
@@ -399,7 +400,13 @@ async fn record_agent_claim(
     validate(ClaimOrigin::Agent, &body).map_err(map_claim_err)?;
     validate_against_projection(ClaimOrigin::Agent, &body, &projection).map_err(map_claim_err)?;
     append_and_rebuild(tiers, claim_raw(event_id, timestamp_ms, body)).await?;
-    write_ok(&claim_id, &task.id)
+    Ok(serde_json::json!({
+        "ok": true,
+        "claim_id": claim_id,
+        "task_id": task.id,
+        "kind": kind.as_str(),
+        "confidence": confidence.as_str(),
+    }))
 }
 
 #[tokio::main]
